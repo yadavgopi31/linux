@@ -46,6 +46,17 @@ static struct nvm_tgt_type *nvm_find_target_type(const char *name)
 	return NULL;
 }
 
+/**
+ * nvm_register_target - Register a target with the LightNVM subsystem
+ * @tt:    Populated &struct nvm_tgt_type structure
+ *
+ * Description:
+ *   nvm_register_target() registers a target with the LightNVM subsystem. It
+ *   can then later be instantiated by the media manager. If target is already
+ *   registered, it will return -EEXIST.
+ *
+ *   Return <0 on error, 0 on success.
+ **/
 int nvm_register_target(struct nvm_tgt_type *tt)
 {
 	int ret = 0;
@@ -61,6 +72,14 @@ int nvm_register_target(struct nvm_tgt_type *tt)
 }
 EXPORT_SYMBOL(nvm_register_target);
 
+/**
+ * nvm_unregister_target - Unregister a target with the LightNVM subsystem
+ * @tt:    Populated &struct nvm_tgt_type structure
+ *
+ * Description:
+ *   nvm_unregister_target() unregisters a target from the LightNVM subsystem.
+ *   On unregistration, it assumes the target has no instances left.
+ **/
 void nvm_unregister_target(struct nvm_tgt_type *tt)
 {
 	if (!tt)
@@ -72,6 +91,19 @@ void nvm_unregister_target(struct nvm_tgt_type *tt)
 }
 EXPORT_SYMBOL(nvm_unregister_target);
 
+/**
+ * nvm_dev_dma_alloc - Allocated device DMA-able memory
+ * @dev:         The &struct nvm_dev in question
+ * @mem_flags:   Memory flags passed for allocation
+ * @dma_handler: DMA handler associated to the allocation
+ *
+ * Description:
+ *  nvm_dev_dma_alloc() calls the device driver specific DMA allocator. Each
+ *  device driver may implement their own method to retrieve DMA memory and thus
+ *  this allows the allocation to reuse internal pools used by device driver.
+ *
+ *  Returns pointer to the data buffer allocated.
+ **/
 void *nvm_dev_dma_alloc(struct nvm_dev *dev, gfp_t mem_flags,
 							dma_addr_t *dma_handler)
 {
@@ -80,10 +112,20 @@ void *nvm_dev_dma_alloc(struct nvm_dev *dev, gfp_t mem_flags,
 }
 EXPORT_SYMBOL(nvm_dev_dma_alloc);
 
-void nvm_dev_dma_free(struct nvm_dev *dev, void *ppa_list,
-							dma_addr_t dma_handler)
+/**
+ * nvm_dev_dma_free - Frees device DMA-able memory
+ * @dev:         The &struct nvm_dev in question
+ * @ptr:         Pointer to data buffer allocated by nvm_dev_dma_alloc
+ * @dma_handler: DMA handler associated to the allocation
+ *
+ * Description:
+ *  nvm_dev_dma_free() calls the device driver specific DMA free. Each
+ *  device driver may implement their own method to retrieve DMA memory and this
+ *  allows it to free the memory again.
+ **/
+void nvm_dev_dma_free(struct nvm_dev *dev, void *ptr, dma_addr_t dma_handler)
 {
-	dev->ops->dev_dma_free(dev->ppalist_pool, ppa_list, dma_handler);
+	dev->ops->dev_dma_free(dev->ppalist_pool, ptr, dma_handler);
 }
 EXPORT_SYMBOL(nvm_dev_dma_free);
 
@@ -121,6 +163,16 @@ struct nvmm_type *nvm_init_mgr(struct nvm_dev *dev)
 	return NULL;
 }
 
+/**
+ * nvm_register_mgr - Register media manager with LightNVM subsystem
+ * @mt:    The &struct nvmm_type to register
+ *
+ * Description:
+ *   nvm_register_mgr() searches for if the media manager already is and ensures
+ *   that it is added to registered managers if not.
+ *
+ *   Returns <0 on error, 0 on success
+ **/
 int nvm_register_mgr(struct nvmm_type *mt)
 {
 	struct nvm_dev *dev;
@@ -148,6 +200,14 @@ finish:
 }
 EXPORT_SYMBOL(nvm_register_mgr);
 
+/**
+ * nvm_unregister_mgr - Unregister a media manager from the LightNVM subsystem
+ * @mt:    The &struct nvmm_type to unregister
+ *
+ * Description:
+ *   nvm_unregister_mgr() will remove the manager. It assumes that all previous
+ *   instances is removed.
+ **/
 void nvm_unregister_mgr(struct nvmm_type *mt)
 {
 	if (!mt)
@@ -170,6 +230,22 @@ static struct nvm_dev *nvm_find_nvm_dev(const char *name)
 	return NULL;
 }
 
+/**
+ * nvm_get_blk_unlocked - Get free logical block from logical lun
+ * @dev:    The @struct nvm_dev in question
+ * @lun:    The logical lun to retrieve the logical block from
+ * @flags:  Any flags to direct logical block selection
+ *
+ * Description:
+ *   nvm_get_blk_unlocked() calls the media manager get_blk_unlocked, which in
+ *   turn will get a free (if available) logical block from the logical lun. The
+ *   flags parameter allows the user to pass flags to direct logical block
+ *   selection.
+ *
+ *   nvm_lun lock must be held.
+ *
+ *   Returns the associated nvm_block structure, or NULL on error.
+ **/
 struct nvm_block *nvm_get_blk_unlocked(struct nvm_dev *dev, struct nvm_lun *lun,
 							unsigned long flags)
 {
@@ -177,13 +253,42 @@ struct nvm_block *nvm_get_blk_unlocked(struct nvm_dev *dev, struct nvm_lun *lun,
 }
 EXPORT_SYMBOL(nvm_get_blk_unlocked);
 
-/* Assumes that all valid pages have already been moved on release to bm */
+/**
+ * nvm_put_blk_unlocked - Put logical block to logical lun
+ * @dev:    The @struct nvm_dev in question
+ * @blk:    The logical block to return to the media manager
+ *
+ * Description:
+ *   nvm_put_blk_unlocked() calls the media manager put_blk_unlocked, which in
+ *   turn will return the logical block to the media manager. The media
+ *   manager decides how to place it when returned and may take it out of
+ *   service if necessary. All data within the logical block is assumed to be
+ *   invalid. The caller must not access the nvm_block structure after
+ *   completion.
+ *
+ *   nvm_lun lock must be held.
+ **/
 void nvm_put_blk_unlocked(struct nvm_dev *dev, struct nvm_block *blk)
 {
 	return dev->mt->put_blk_unlocked(dev, blk);
 }
 EXPORT_SYMBOL(nvm_put_blk_unlocked);
 
+/**
+ * nvm_get_blk - Get free logical block from logical lun
+ * @dev:    The @struct nvm_dev in question
+ * @lun:    The logical lun to retrieve the logical block from
+ * @flags:  Any flags to direct logical block selection
+ *
+ * Description:
+ *   nvm_get_blk() calls the media manager get_blk, which in turn will get a
+ *   free (if available) logical block from the logical lun. The flags parameter
+ *   allows the user to pass flags to direct logical block selection.
+ *
+ *   nvm_lun lock must _not_ be held.
+ *
+ *   Returns the select nvm_block, or NULL on error.
+ **/
 struct nvm_block *nvm_get_blk(struct nvm_dev *dev, struct nvm_lun *lun,
 							unsigned long flags)
 {
@@ -191,25 +296,77 @@ struct nvm_block *nvm_get_blk(struct nvm_dev *dev, struct nvm_lun *lun,
 }
 EXPORT_SYMBOL(nvm_get_blk);
 
-/* Assumes that all valid pages have already been moved on release to bm */
+/**
+ * nvm_put_blk - Put logical block to logical lun
+ * @dev:    The @struct nvm_dev in question
+ * @blk:    The logical block to return to the media manager
+ *
+ * Description:
+ *   nvm_put_blk() calls the media manager put_blk, which in turn will return
+ *   the logical block to the media manager. The media manager decides how to
+ *   place it when returned and may take it out of service if necessary.
+ *   All data within the logical block is assumed to be invalid. The caller must
+ *   not access the nvm_block structure after completion.
+ *
+ *   nvm_lun lock must _not_ be held.
+ **/
 void nvm_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 {
 	return dev->mt->put_blk(dev, blk);
 }
 EXPORT_SYMBOL(nvm_put_blk);
 
+/**
+ * nvm_submit_io - Submit an io to the underlying media media manager
+ * @dev:    The &struct nvm_dev in question
+ * @rqd:    The &struct nvm_rq that describes the I/O to be submitted
+ *
+ * Description:
+ *   nvm_submit_io() will submit the nvm_rq to the media manager. It is up to
+ *   the media manager to direct the I/O to the underlying device. Any
+ *   transformation of the rqd->ppalist structure is performed; It is the
+ *   caller's responsibility that it is kept within device max_sect size.
+ *
+ *   Returns <0 on error, 0 on success
+ **/
 int nvm_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 {
 	return dev->mt->submit_io(dev, rqd);
 }
 EXPORT_SYMBOL(nvm_submit_io);
 
+/**
+ * nvm_erase_blk - Submit erase of the generic nvm_block
+ * @dev:    The &struct nvm_dev in question
+ * @blk:    The &nvm_block structure describing the block in the logical
+ *          representation.
+ *
+ * Description:
+ *   nvm_erase_blk() will submit the logical block to be erased by the media
+ *   manager. It is the responsibility of the media manager to convert from the
+ *   logical representation to the physical device representation and erase the
+ *   appropriate block(s) that the nvm_block structure represents.
+ *
+ *   Returns <0 on error, 0 on success
+ **/
 int nvm_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
 {
 	return dev->mt->erase_blk(dev, blk, 0);
 }
 EXPORT_SYMBOL(nvm_erase_blk);
 
+/**
+ * nvm_addr_to_generic_mode - Convert from device-specific to generic addressing
+ * @dev:    The &struct nvm_dev in question
+ * @rqd:    The &struct nvm_rq request with device-specific addresses
+ *
+ * Description:
+ * nvm_generic_to_addr_mode() transforms physical addresses from generic
+ * addressing to device-specific addressing. Targets always work with generic
+ * addresses, and devices always work with device-specific. It is the
+ * responsibility of the media manager to convert to and from device-specific
+ * addresses.
+ **/
 void nvm_addr_to_generic_mode(struct nvm_dev *dev, struct nvm_rq *rqd)
 {
 	int i;
@@ -224,6 +381,18 @@ void nvm_addr_to_generic_mode(struct nvm_dev *dev, struct nvm_rq *rqd)
 }
 EXPORT_SYMBOL(nvm_addr_to_generic_mode);
 
+/**
+ * nvm_generic_to_addr_mode - Convert from generic to device-specific addressing
+ * @dev:    The &struct nvm_dev in question
+ * @rqd:    The &struct nvm_rq request with generic addresses
+ *
+ * Description:
+ * nvm_generic_to_addr_mode() transforms physical addresses from generic
+ * addressing to device-specific addressing. Targets always work with generic
+ * addresses, and devices always work with device-specific. It is the
+ * responsibility of the media manager to convert to and from device-specific
+ * addresses.
+ **/
 void nvm_generic_to_addr_mode(struct nvm_dev *dev, struct nvm_rq *rqd)
 {
 	int i;
@@ -238,6 +407,21 @@ void nvm_generic_to_addr_mode(struct nvm_dev *dev, struct nvm_rq *rqd)
 }
 EXPORT_SYMBOL(nvm_generic_to_addr_mode);
 
+/**
+ * nvm_set_rqd_ppalist - Set nvm_rqd with associated ppa list
+ * @dev:    The &struct nvm_dev in question
+ * @rqd:    The &struct nvm_rq to store the ppa list in
+ * @ppas:   The &struct ppa_addr ppa list of addresses to store in rqd
+ * @nr_ppas:The number of ppas in the ppa list
+ *
+ * Description:
+ *   nvm_set_rqd_ppalist() transforms a ppa list to its nvm_rq counterpart.
+ *   nvm_rq commands may be expanded into its single, dual, quad plane counter
+ *   parts. This function expands takes care of this and passes it into the
+ *   nvm_rq structure.
+ *
+ *   Return <0 on error, 0 on success
+ **/
 int nvm_set_rqd_ppalist(struct nvm_dev *dev, struct nvm_rq *rqd,
 					struct ppa_addr *ppas, int nr_ppas)
 {
@@ -282,6 +466,22 @@ void nvm_free_rqd_ppalist(struct nvm_dev *dev, struct nvm_rq *rqd)
 }
 EXPORT_SYMBOL(nvm_free_rqd_ppalist);
 
+/**
+ * nvm_erase_ppa - Erase the block(s) associated with the physical addresses
+ * @dev:     The @struct nvm_dev in question
+ * @ppas:    Pointer to a list of PPAs to erase
+ * @nr_ppas: Number of PPAs in ppas pointer
+ *
+ * Description:
+ *   nvm_erase_ppa() erases the physical blocks corresponding to the ppas and
+ *   number of physical addresses nr_ppas. It assumes the PPAs are in generic
+ *   addressing format. On completion, the PPAs blocks will have been erased.
+ *
+ *   It is the responsibility of the user to not submit more ppas than device
+ *   supports.
+ *
+ *   Returns <0 on error, and 0 on success
+ **/
 int nvm_erase_ppa(struct nvm_dev *dev, struct ppa_addr *ppas, int nr_ppas)
 {
 	struct nvm_rq rqd;
@@ -306,6 +506,16 @@ int nvm_erase_ppa(struct nvm_dev *dev, struct ppa_addr *ppas, int nr_ppas)
 }
 EXPORT_SYMBOL(nvm_erase_ppa);
 
+/**
+ * nvm_end_io - Complete a nvm_rq request
+ * @rqd:    The &struct nvm_rq in question
+ * @error:  error code, 0 if successful
+ *
+ * Description:
+ *   nvm_end_io() completes the nvm_rq structure by storing error in the nvm_rq
+ *   structure, followed by a call to its end_io callback. nvm_rq->end_io must
+ *   be set before call.
+ */
 void nvm_end_io(struct nvm_rq *rqd, int error)
 {
 	rqd->error = error;
@@ -322,7 +532,25 @@ static void nvm_end_io_sync(struct nvm_rq *rqd)
 	complete(waiting);
 }
 
-int nvm_submit_ppa(struct nvm_dev *dev, struct ppa_addr *ppa, int nr_ppas,
+/**
+ * nvm_submit_ppa - Submit a list of ppas to device synchronously.
+ * @dev:     The &struct nvm_dev in question
+ * @ppas:     List of PPAs
+ * @nr_ppas: Number of PPAs in ppa list
+ * @opcode:  Device opcode to be sent with the device
+ * @flags:   Specific flags that is passed into the resulting nvm_rq structure
+ * @buf:     Data buffer for the PPAs listed
+ * @len:     Length of buffer
+ *
+ * Description:
+ *   nvm_submit_ppa() takes a list of generic address ppas, together with a data
+ *   buffer and opcode, which creates a nvm_rq data structure to be sent to the
+ *   underlying device. The function will execute this command synchronously and
+ *   return the error, if any.
+ *
+ *   Returns <0 on error, 0 on success
+ **/
+int nvm_submit_ppa(struct nvm_dev *dev, struct ppa_addr *ppas, int nr_ppas,
 				int opcode, int flags, void *buf, int len)
 {
 	DECLARE_COMPLETION_ONSTACK(wait);
@@ -336,7 +564,7 @@ int nvm_submit_ppa(struct nvm_dev *dev, struct ppa_addr *ppa, int nr_ppas,
 		return -ENOMEM;
 
 	memset(&rqd, 0, sizeof(struct nvm_rq));
-	ret = nvm_set_rqd_ppalist(dev, &rqd, ppa, nr_ppas);
+	ret = nvm_set_rqd_ppalist(dev, &rqd, ppas, nr_ppas);
 	if (ret) {
 		bio_put(bio);
 		return ret;
@@ -536,6 +764,21 @@ static void nvm_exit(struct nvm_dev *dev)
 	pr_info("nvm: successfully unloaded\n");
 }
 
+/**
+ * nvm_register - Register a device with the LightNVM subsystem
+ * @q:         The &struct request_queue of the device
+ * @disk_name: The string name of the device
+ * @ops:       The callbacks used by the LightNVM core to interact with the
+ *             device.
+ *
+ * Description:
+ *   nvm_register() registers a device with the LightNVM subsystem. It validates
+ *   nvm_dev_ops and instantiates the appropriate media manager. If a device
+ *   have previously been initialized, it will furthermore instantiate the
+ *   associated media manager.
+ *
+ *   Returns <0 on error, 0 on success
+ **/
 int nvm_register(struct request_queue *q, char *disk_name,
 							struct nvm_dev_ops *ops)
 {
@@ -592,6 +835,15 @@ err_init:
 }
 EXPORT_SYMBOL(nvm_register);
 
+/**
+ * nvm_unregister - Unregister a device from the LightNVM subsystem
+ * @disk_name:    Device name used for registering the device
+ *
+ * Description:
+ *   nvm_unregister() removes a previously registered device from the LightNVM
+ *   subsystem. If found, it will also call ->exit on the associated media
+ *   manager to perform shutdown of its instantiated structures.
+ **/
 void nvm_unregister(char *disk_name)
 {
 	struct nvm_dev *dev;
