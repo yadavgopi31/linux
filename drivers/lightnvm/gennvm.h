@@ -19,6 +19,7 @@
 #include <linux/vmalloc.h>
 
 #include <linux/lightnvm.h>
+#include "sysfs.h"
 
 struct gen_lun {
 	struct nvm_lun vlun;

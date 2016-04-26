@@ -27,6 +27,8 @@
 #include <linux/lightnvm.h>
 #include <linux/sched/sysctl.h>
 
+#include "sysfs.h"
+
 static LIST_HEAD(nvm_tgt_types);
 static DECLARE_RWSEM(nvm_tgtt_lock);
 static LIST_HEAD(nvm_mgrs);
@@ -648,6 +650,7 @@ err:
 
 static void nvm_exit(struct nvm_dev *dev)
 {
+	nvm_sysfs_unregister_dev(dev);
 	if (dev->dma_pool)
 		dev->ops->destroy_dma_pool(dev->dma_pool);
 	nvm_free(dev);
@@ -683,6 +686,10 @@ int nvm_register(struct nvm_dev *dev)
 		}
 	}
 
+	ret = nvm_sysfs_register_dev(dev);
+	if (ret)
+		goto err_ppalist;
+
 	if (dev->identity.cap & NVM_ID_DCAP_BBLKMGMT) {
 		ret = nvm_get_sysblock(dev, &dev->sb);
 		if (!ret)
@@ -699,6 +706,8 @@ int nvm_register(struct nvm_dev *dev)
 	up_write(&nvm_lock);
 
 	return 0;
+err_ppalist:
+	dev->ops->destroy_dma_pool(dev->dma_pool);
 err_init:
 	kfree(dev->lun_map);
 	return ret;
@@ -1159,11 +1168,18 @@ static int __init nvm_mod_init(void)
 	if (ret)
 		pr_err("nvm: misc_register failed for control device");
 
+	ret = nvm_sysfs_register(&_nvm_misc);
+	if (ret) {
+		pr_err("nvm: sysfs registration failed.\n");
+		misc_deregister(&_nvm_misc);
+	}
+
 	return ret;
 }
 
 static void __exit nvm_mod_exit(void)
 {
+	nvm_sysfs_unregister(&_nvm_misc);
 	misc_deregister(&_nvm_misc);
 }
 

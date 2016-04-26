@@ -179,6 +179,8 @@ struct nvm_id_group {
 	u16	cpar;
 
 	struct nvm_id_lp_tbl lptbl;
+
+	struct kobject kobj;
 };
 
 struct nvm_addr_format {
@@ -211,6 +213,8 @@ struct nvm_target {
 	struct nvm_dev *dev;
 	struct nvm_tgt_type *type;
 	struct gendisk *disk;
+
+	struct kobject kobj;
 };
 
 struct nvm_tgt_instance {
@@ -356,6 +360,8 @@ struct nvm_dev {
 
 	struct mutex mlock;
 	spinlock_t lock;
+
+	struct kobject kobj;
 };
 
 static inline struct ppa_addr generic_to_dev_addr(struct nvm_dev *dev,

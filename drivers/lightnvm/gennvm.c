@@ -60,7 +60,7 @@ static int gen_create_tgt(struct nvm_dev *dev, struct nvm_ioctl_create *create)
 	}
 	mutex_unlock(&gn->lock);
 
-	t = kmalloc(sizeof(struct nvm_target), GFP_KERNEL);
+	t = kzalloc(sizeof(struct nvm_target), GFP_KERNEL);
 	if (!t)
 		return -ENOMEM;
 
@@ -89,12 +89,15 @@ static int gen_create_tgt(struct nvm_dev *dev, struct nvm_ioctl_create *create)
 
 	blk_queue_max_hw_sectors(tqueue, 8 * dev->ops->max_phys_sect);
 
-	set_capacity(tdisk, tt->capacity(targetdata));
-	add_disk(tdisk);
-
 	t->type = tt;
 	t->disk = tdisk;
 	t->dev = dev;
+
+	if (nvm_sysfs_register_target(t))
+		goto err_init;
+
+	set_capacity(tdisk, tt->capacity(targetdata));
+	add_disk(tdisk);
 
 	mutex_lock(&gn->lock);
 	list_add_tail(&t->list, &gn->targets);
@@ -125,6 +128,9 @@ static void __gen_remove_target(struct nvm_target *t)
 	put_disk(tdisk);
 
 	list_del(&t->list);
+
+	nvm_sysfs_unregister_target(t);
+
 	kfree(t);
 }
 
