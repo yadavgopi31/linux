@@ -1,0 +1,94 @@
+pblk
+====
+
+pblk provides a lightnvm target that implements an host-side flash translation
+layer. The target integrates with a LightNVM media manager that support the
+get/put block provisioning interface.
+
+pblk expose Open-Channel SSD storage as a block storage. The implementation
+covers:
+
+   - Page-based host-side translation table management
+   - Translation table recovery on power outage
+   - Write buffering for writing to flash pages
+   - Retire bad flash blocks on write
+
+Write Path
+==========
+
+Flash pages are typically between 16-32K and requires that they are
+written in a single write. Therefore data are buffered in the host, before being
+sent off to flash media.
+
+pblk implements a write buffer to support this. The write buffer is implemented
+as a ring bugger, with a head pointer, a tail pointer and a grace period
+pointer. The head and tail pointer defines the in-use and empty area of the
+buffer, while the grace pointer defines the data that is yet to be stored
+correctly on media.
+
+The grace pointer is important for flash media such as MLC flash, that exposes
+both a lower and upper flash page. The data in the lower flash page cannot be
+read back until the upper flash page has been written. Therefore, even if data
+has been written, it must still reside in host until more data has been written.
+
+The layout of the write buffer can be shown like this:
+
+layout:
+                                                 head pointer (user bios)
+                                                             |
+-------------------------------------------------------------|------------------
+|    unused buffer    |   grace data  | buffer to be written | unused buffer   |
+----------------------|---------------|-----------------------------------------
+                      |               |
+                  tail pointer  grace pointer
+
+
+On a new write, the bio for the write is converted into a write context
+(pblk_w_ctx), where the LBA, length and flush requirements are stored. The bio
+data is copied to the internal write buffer.
+
+When added to the write context list. The actual drive write is executed by a
+write thread. The thread is either kicked on flush or after a certain time
+period. The write thread will iterate write contexts that still have writes to
+be submitted. The write thread will only write on flush or if there is enough
+data to fill a flash page or more. In successful write, the logical to physical
+address translation table (L2P) is updated with the new physical location.
+
+If a write fails, the resulting blocks are retired and marked grown bad. The
+data is moved away from the blocks (rewritten to new blocks) and rewritten at a
+later point in time.
+
+Until data is out of grace period, the data is cached and any reads must be
+served from cache.
+
+Read path
+=========
+
+The read path is simpler than the write path. The read path simply looks up in
+the L2P and uses the "cached" bit to either go look for data in the write
+buffer, or go to disk for the appropriate read. The write path will make sure to
+update the L2P when data can be safely read from drive.
+
+In the case of shutdown, empty data is written to media, to allow valid data to
+be read reliable from flash. In the case of a power failure, the device is
+scanned and empty data is written similarly so that the data can be read
+reliably.
+
+Translation Table Recovery
+==========================
+
+The L2P translation table is currently maintained in main memory. On power
+failure, this table must be restored. The table is maintained on media using
+multiple redundant data paths. The LBA to PPA is stored in the out of band area
+of each flash page write, the last page of each flash block, and as a L2P
+snapshot. In the case of a power failure, with an unclean shutdown, blocks are
+first scanned by their last page, and worst case if last flash block haven been
+written, it is sequentially scanned to reread the L2P table.
+
+After the reconstruction, the L2P table is current, and user data is accepted.
+
+
+
+
+
+
