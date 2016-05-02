@@ -203,8 +203,12 @@ static int gennvm_bmi_mark_blk(struct gen_nvm *gn, struct ppa_addr *ppas,
 	nvm_set_rqd_ppalist(dev, &rqd, ppas, nr_ppas, 0);
 	nvm_generic_to_addr_mode(dev, &rqd);
 
-	ret = dev->ops->set_bb_tbl(dev, &rqd, type);
+	ret = dev->ops->set_bb_tbl(dev, &rqd.ppa_addr, rqd.nr_pages, type);
 	nvm_free_rqd_ppalist(dev, &rqd);
+	if (ret) {
+		pr_err("nvm: failed bb mark\n");
+		return -EINVAL;
+	}
 
 	return ret;
 }
