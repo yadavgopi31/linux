@@ -573,6 +573,9 @@ static int nvm_core_init(struct nvm_dev *dev)
 
 	dev->plane_mode = NVM_PLANE_SINGLE;
 	dev->max_rq_size = dev->ops->max_phys_sect * dev->sec_size;
+	dev->max_sec_rq = dev->ops->max_phys_sect;
+	/* assume max_phys_sect % dev->min_write_pgs == 0 */
+	dev->min_sec_w_rq = dev->sec_per_pl * (dev->sec_size / PAGE_SIZE);
 
 	if (grp->mpos & 0x020202)
 		dev->plane_mode = NVM_PLANE_DOUBLE;
@@ -941,6 +944,8 @@ static int __nvm_configure_remove(struct nvm_ioctl_remove *remove)
 static int nvm_configure_show(const char *val)
 {
 	struct nvm_dev *dev;
+	struct nvm_target *t = NULL;
+	struct nvm_tgt_type *tt = NULL;
 	char opcode, devname[DISK_NAME_LEN];
 	int ret;
 
@@ -962,6 +967,13 @@ static int nvm_configure_show(const char *val)
 		return 0;
 
 	dev->mt->lun_info_print(dev);
+
+	down_write(&nvm_lock);
+	list_for_each_entry(t, &nvm_targets, list) {
+		tt = t->type;
+		tt->print_debug(t->disk->private_data);
+	}
+	up_write(&nvm_lock);
 
 	return 0;
 }
