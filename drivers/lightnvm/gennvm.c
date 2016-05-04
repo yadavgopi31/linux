@@ -356,7 +356,7 @@ static int gen_block_bb(struct gen_dev *gn, struct ppa_addr ppa,
 	lun = &gn->luns[(dev->luns_per_chnl * ppa.g.ch) + ppa.g.lun];
 
 	for (i = 0; i < nr_blks; i++) {
-		if (blks[i] == 0)
+		if (blks[i] == 0 && i > 16)
 			continue;
 
 		blk = &lun->vlun.blocks[i];
@@ -474,7 +474,7 @@ static int gen_blocks_init(struct nvm_dev *dev, struct gen_dev *gn)
 		}
 	}
 
-	if ((dev->identity.dom & NVM_RSP_L2P) && dev->ops->get_l2p_tbl) {
+	if (dev->ops->get_l2p_tbl) {
 		ret = dev->ops->get_l2p_tbl(dev, 0, dev->total_secs,
 							gen_block_map, dev);
 		if (ret) {
