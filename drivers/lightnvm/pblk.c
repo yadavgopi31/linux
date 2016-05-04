@@ -2308,11 +2308,11 @@ static int pblk_blocks_init(struct pblk *pblk)
 		rlun = &pblk->luns[lun];
 		for (blk = 0; blk < pblk->dev->blks_per_lun; blk++) {
 			rblk = &rlun->blocks[blk];
-			ret = pblk_block_map_recover_blk(pblk, rblk);
-			if (ret) {
-				pr_err("nvm: pblk: could not recover l2p\n");
-				goto out;
-			}
+			/* ret = pblk_block_map_recover_blk(pblk, rblk); */
+			/* if (ret) { */
+				/* pr_err("nvm: pblk: could not recover l2p\n"); */
+				/* goto out; */
+			/* } */
 		}
 	}
 
