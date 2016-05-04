@@ -833,11 +833,14 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	sector_t soffset;
 	int ret;
 
+	/* XXX: Workaround due to FW bug */
+#if 0
 	if (dev->identity.dom & NVM_RSP_L2P) {
 		pr_err("nvm: pblk: device has device-side translation table. Target not supported. (%x)\n",
 							dev->identity.dom);
 		return ERR_PTR(-EINVAL);
 	}
+#endif
 
 	pblk = kzalloc(sizeof(struct pblk), GFP_KERNEL);
 	if (!pblk)
