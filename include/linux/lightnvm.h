@@ -240,6 +240,8 @@ struct nvm_rq {
 	void *meta_list;
 	dma_addr_t dma_meta_list;
 
+	void *priv; /* remove me */
+
 	struct completion *wait;
 	nvm_end_io_fn *end_io;
 
@@ -253,12 +255,14 @@ struct nvm_rq {
 
 static inline struct nvm_rq *nvm_rq_from_pdu(void *pdu)
 {
-	return pdu - sizeof(struct nvm_rq);
+//	return pdu - sizeof(struct nvm_rq);
+	return container_of(pdu, struct nvm_rq, priv);
 }
 
 static inline void *nvm_rq_to_pdu(struct nvm_rq *rqdata)
 {
-	return rqdata + 1;
+//	return rqdata + 1;
+	return rqdata->priv;
 }
 
 struct nvm_block;
