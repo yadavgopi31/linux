@@ -210,6 +210,34 @@ void nvm_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 }
 EXPORT_SYMBOL(nvm_put_blk);
 
+#ifdef CONFIG_NVM_DEBUG
+int nvm_boundary_checks(struct nvm_dev *dev, struct ppa_addr *ppas, int nr_ppas)
+{
+	int i;
+	struct ppa_addr *ppa;
+
+	for (i = 0; i < nr_ppas; i++) {
+		ppa = &ppas[i];
+
+		if (ppa->g.ch < dev->nr_chnls &&
+				ppa->g.lun < dev->nr_luns &&
+				ppa->g.pl < dev->nr_planes &&
+				ppa->g.blk < dev->blks_per_lun &&
+				ppa->g.pg < dev->pgs_per_blk &&
+				ppa->g.sec < dev->sec_per_pg)
+			continue;
+
+		pr_err("nvm: ppa out of bound (ch:%u lun:%u pl:%u blk:%u pg:%u sec: %u\n",
+				ppa->g.ch, ppa->g.lun, ppa->g.pl,
+				ppa->g.blk, ppa->g.pg, ppa->g.sec);
+
+		return 1;
+	}
+	return 0;
+}
+EXPORT_SYMBOL(nvm_boundary_checks);
+#endif
+
 int nvm_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 {
 	return dev->mt->submit_io(dev, rqd);
