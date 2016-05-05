@@ -203,7 +203,7 @@ static int gennvm_bmi_mark_blk(struct gen_nvm *gn, struct ppa_addr *ppas,
 	nvm_set_rqd_ppalist(dev, &rqd, ppas, nr_ppas, 0);
 	nvm_generic_to_addr_mode(dev, &rqd);
 
-	ret = dev->ops->set_bb_tbl(dev, &rqd.ppa_addr, rqd.nr_pages, type);
+	ret = dev->ops->set_bb_tbl(dev, &rqd.ppa_addr, rqd.nr_ppas, type);
 	nvm_free_rqd_ppalist(dev, &rqd);
 	if (ret) {
 		pr_err("nvm: failed bb mark\n");
@@ -215,34 +215,33 @@ static int gennvm_bmi_mark_blk(struct gen_nvm *gn, struct ppa_addr *ppas,
 
 static int gennvm_bmi_init_blks(struct gen_nvm *gn)
 {
-	LIST_HEAD(bmi_blk_list);
+	LIST_HEAD(blk_list);
 	int nblks, ret = 0;
 
-	nblks = gennvm_bmi_get_blks(gn, NVM_BLK_T_MM, 0, &bmi_blk_list);
+	nblks = gennvm_bmi_get_blks(gn, NVM_BLK_T_MM, 0, &blk_list);
 	if (nblks < 0)
 		return ret;
 
-	if (list_empty(&bmi_blk_list)) {
+	if (list_empty(&blk_list)) {
 		struct gen_bmi_blk *b;
 		/*
 		 * initialize new block by allocating a free block and mark
 		 * it as an mm block.
 		 */
-		nblks = gennvm_bmi_get_blks(gn, NVM_BLK_T_FREE, 1,
-								&bmi_blk_list);
+		nblks = gennvm_bmi_get_blks(gn, NVM_BLK_T_FREE, 1, &blk_list);
 		if (nblks < 0)
 			return ret;
-		if (list_empty(&bmi_blk_list))
+		if (list_empty(&blk_list))
 			return -EINVAL;
-		b = list_first_entry(&bmi_blk_list, struct gen_bmi_blk, list);
+		b = list_first_entry(&blk_list, struct gen_bmi_blk, list);
 		ret = gennvm_bmi_mark_blk(gn, &b->ppa, 1, NVM_BLK_T_MM);
 		if (ret) {
-			gennvm_bmi_free_blks(&bmi_blk_list);
+			gennvm_bmi_free_blks(&blk_list);
 			return ret;
 		}
 	}
 
-	list_splice(&bmi_blk_list, &gn->bmi_blk_list);
+	list_splice(&blk_list, &gn->bmi_blk_list);
 
 	return 0;
 }
@@ -253,6 +252,7 @@ static int gennvm_bmi_read_blk(struct nvm_dev *dev, struct gen_bmi_blk *b)
 	struct gennvm_sys_block sys;
 	void *buf;
 
+	printk("nvm: reading block\n");
 	buf = kmalloc(dev->fpg_size, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
@@ -261,11 +261,17 @@ static int gennvm_bmi_read_blk(struct nvm_dev *dev, struct gen_bmi_blk *b)
 							buf, dev->fpg_size);
 	if (!ret) {
 		memcpy(&sys, buf, sizeof(struct gennvm_sys_block));
+
+		if (be32_to_cpu(sys.magic) != GENNVM_SYSBLK_MAGIC)
+			ret = -EINVAL;
+
 		b->seqnr = be32_to_cpu(sys.seqnr);
 		b->erase_cnt = be32_to_cpu(sys.erase_cnt);
 		b->version = be32_to_cpu(sys.version);
+		printk("nvm: found data %u %x\n", ret, be32_to_cpu(sys.magic));
 	}
 
+	printk("nvm: b %u %u %u\n", b->seqnr, b->erase_cnt, b->version);
 	kfree(buf);
 
 	return 0;
@@ -281,6 +287,7 @@ static int gennvm_bmi_read_all_blk_metadata(struct gen_nvm *gn)
 	for (i = 0; i < gn->nr_luns; i++) {
 		lun = &gn->luns[i];
 
+		printk("nvm: lun: %u\n", i);
 		list_for_each_entry(bmi_blk, &gn->bmi_blk_list, list) {
 			if (gennvm_bmi_read_blk(dev, bmi_blk))
 				pr_err("could not read bmi blk\n");
@@ -305,7 +312,7 @@ static int gennvm_bmi_init(struct gen_nvm *gn)
 	 */
 
 	ret = gennvm_bmi_init_blks(gn);
-	if (!ret)
+	if (ret)
 		return ret;
 
 	ret = gennvm_bmi_read_all_blk_metadata(gn);
