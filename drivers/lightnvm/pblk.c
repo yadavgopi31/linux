@@ -780,7 +780,8 @@ static inline u64 pblk_current_pg(struct pblk *pblk, struct pblk_block *rblk)
 static int pblk_map_page(struct pblk *pblk, unsigned int sentry,
 			struct ppa_addr *ppa_list,
 			struct pblk_sec_meta *meta_list,
-			unsigned int nr_secs, unsigned int valid_secs)
+			unsigned int nr_secs, unsigned int valid_secs,
+			int prov)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct pblk_lun *rlun;
@@ -854,7 +855,7 @@ static int pblk_map_page(struct pblk *pblk, unsigned int sentry,
 	spin_unlock(&rlun->lock);
 
 	/* Prepare block for next write */
-	if (block_is_full(pblk, rblk)) {
+	if (prov && block_is_full(pblk, rblk)) {
 		rblk = pblk_get_blk(pblk, rlun, 0);
 		if (!rblk) {
 			pr_err("pblk: cannot allocate new block\n");
@@ -1588,7 +1589,7 @@ static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		BUG_ON(padded_secs != 0);
 
 		ret = pblk_map_page(pblk, c_ctx->sentry, &rqd->ppa_addr,
-								&meta[0], 1, 1);
+							&meta[0], 1, 1, 1);
 		if (ret) {
 			/*
 			 * TODO:  There is no more available pages, we need to
@@ -1613,7 +1614,7 @@ static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		cur_valid_secs = (i + min > valid_secs) ?
 						(valid_secs % min) : min;
 		ret = pblk_map_page(pblk, c_ctx->sentry + i, &rqd->ppa_list[i],
-						&meta[i], min, cur_valid_secs);
+					&meta[i], min, cur_valid_secs, 1);
 		if (ret) {
 			/*
 			 * TODO:  There is no more available pages, we need to
