@@ -2259,7 +2259,8 @@ static int pblk_block_map_recover_blk(struct pblk *pblk,
 	if (nvm_submit_io(dev, rqd)) {
 		pr_err("pblk: I/O submission failed\n");
 		ret = -1;
-		goto free_rqd_ppalist;
+		nvm_free_rqd_ppalist(dev, rqd);
+		goto free_rqd;
 	}
 	wait_for_completion_io(&wait);
 
@@ -2271,7 +2272,7 @@ static int pblk_block_map_recover_blk(struct pblk *pblk,
 						rlpg_len - sizeof(crc)));
 
 	if (rlpg->crc != crc || rlpg->status != NVM_BLK_ST_CLOSED)
-		goto free_rqd_ppalist;
+		goto free_rqd;
 
 	bppa = global_addr(pblk, rblk, 0);
 	lba_list = pblk_rlpg_to_llba(rlpg);
@@ -2281,8 +2282,6 @@ static int pblk_block_map_recover_blk(struct pblk *pblk,
 		pblk_update_map(pblk, lba_list[i], rblk, ppa);
 	}
 
-free_rqd_ppalist:
-	nvm_free_rqd_ppalist(dev, rqd);
 free_rqd:
 	mempool_free(rqd, pblk->r_rq_pool);
 free_bio:
