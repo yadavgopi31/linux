@@ -2465,6 +2465,9 @@ err:
 static void pblk_print_debug(void *private)
 {
 	struct pblk *pblk = private;
+	struct pblk_lun *rlun;
+	struct pblk_block *rblk;
+	unsigned int i;
 
 	pr_info("pblk: %u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
 				atomic_read(&pblk->inflight_writes),
@@ -2475,6 +2478,25 @@ static void pblk_print_debug(void *private)
 				atomic_read(&pblk->sync_writes),
 				atomic_read(&pblk->compl_writes),
 				atomic_read(&pblk->sync_reads));
+
+	pblk_for_each_lun(pblk, rlun, i) {
+		spin_lock(&rlun->lock_lists);
+		list_for_each_entry(rblk, &rlun->open_list, list) {
+			spin_lock(&rblk->lock);
+			pr_info("pblk:open:\tblk:%lu\t%u/%u\t%u\t%u\t%u\n",
+					rblk->parent->id,
+					pblk->dev->sec_per_blk,
+					bitmap_weight(rblk->pages,
+							pblk->dev->sec_per_blk),
+					bitmap_weight(rblk->sync_bitmap,
+							pblk->dev->sec_per_blk),
+					bitmap_weight(rblk->invalid_pages,
+							pblk->dev->sec_per_blk),
+					rblk->nr_invalid_pages);
+			spin_unlock(&rblk->lock);
+		}
+		spin_unlock(&rlun->lock_lists);
+	}
 
 	pblk_rb_print_debug(&pblk->rwb);
 }
