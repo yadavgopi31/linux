@@ -26,6 +26,9 @@ static DECLARE_RWSEM(pblk_lock);
 
 static int pblk_submit_io(struct pblk *pblk, struct bio *bio,
 							unsigned long flags);
+static void pblk_close_rblk_queue(struct work_struct *work);
+static void pblk_run_gc(struct pblk *pblk, struct pblk_block *rblk,
+					void(*work)(struct work_struct *));
 
 #define pblk_for_each_lun(pblk, rlun, i) \
 		for ((i) = 0, rlun = &(pblk)->luns[0]; \
@@ -35,9 +38,12 @@ static int pblk_submit_io(struct pblk *pblk, struct bio *bio,
 static void pblk_page_pad_invalidate(struct pblk *pblk, struct pblk_block *rblk,
 							struct ppa_addr a)
 {
-	WARN_ON(test_and_set_bit(a.ppa, rblk->sync_bitmap));
 	WARN_ON(test_and_set_bit(a.ppa, rblk->invalid_pages));
 	rblk->nr_invalid_pages++;
+
+	WARN_ON(test_and_set_bit(a.ppa, rblk->sync_bitmap));
+	if (bitmap_full(rblk->sync_bitmap, pblk->nr_blk_dsecs))
+		pblk_run_gc(pblk, rblk, pblk_close_rblk_queue);
 }
 
 static void pblk_invalidate_range(struct pblk *pblk, sector_t slba,
@@ -116,6 +122,17 @@ static inline u64 pblk_next_free_sec(struct pblk *pblk, struct pblk_block *rblk)
 	return free_sec;
 }
 
+static inline u64 pblk_nr_free_secs(struct pblk *pblk, struct pblk_block *rblk)
+{
+	u64 free_secs = pblk->nr_blk_dsecs;
+
+	spin_lock(&rblk->lock);
+	free_secs -= bitmap_weight(rblk->pages, pblk->nr_blk_dsecs);
+	spin_unlock(&rblk->lock);
+
+	return free_secs;
+}
+
 /* requires lun->lock taken */
 static void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk)
 {
@@ -129,19 +146,8 @@ static void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk)
 	rlun->cur = rblk;
 }
 
-static void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk)
+static void pblk_free_blk(struct pblk_block *rblk)
 {
-	struct pblk_lun *rlun = rblk->rlun;
-	struct nvm_lun *lun = rlun->parent;
-
-	spin_lock(&lun->lock);
-	nvm_put_blk_unlocked(pblk->dev, rblk->parent);
-	spin_unlock(&lun->lock);
-
-	spin_lock(&rlun->lock_lists);
-	list_del(&rblk->list);
-	spin_unlock(&rlun->lock_lists);
-
 	if (rblk->pages)
 		kfree(rblk->pages);
 	if (rblk->sync_bitmap)
@@ -150,6 +156,45 @@ static void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk)
 		kfree(rblk->invalid_pages);
 	if (rblk->rlpg)
 		kfree(rblk->rlpg);
+}
+
+static void pblk_free_blks(struct pblk *pblk)
+{
+	struct pblk_lun *rlun;
+	struct pblk_block *rblk, *trblk;
+	unsigned int i;
+
+	pblk_for_each_lun(pblk, rlun, i) {
+		spin_lock(&rlun->lock);
+		list_for_each_entry_safe(rblk, trblk, &rlun->prio_list, prio) {
+			pblk_free_blk(rblk);
+			list_del(&rblk->prio);
+		}
+		spin_unlock(&rlun->lock);
+	}
+}
+
+static void __pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk)
+{
+	struct pblk_lun *rlun = rblk->rlun;
+	struct nvm_lun *lun = rlun->parent;
+
+	spin_lock(&lun->lock);
+	nvm_put_blk_unlocked(pblk->dev, rblk->parent);
+	spin_unlock(&lun->lock);
+
+	list_del(&rblk->list);
+
+	pblk_free_blk(rblk);
+}
+
+static void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk)
+{
+	struct pblk_lun *rlun = rblk->rlun;
+
+	spin_lock(&rlun->lock_lists);
+	__pblk_put_blk(pblk, rblk);
+	spin_unlock(&rlun->lock_lists);
 }
 
 static void pblk_put_blks(struct pblk *pblk)
@@ -178,8 +223,8 @@ static struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
 	int nr_entries = pblk->nr_blk_dsecs;
 	unsigned int rlpg_len, req_len;
 
-	sync_bitmap = kzalloc(BITS_TO_LONGS(nr_entries) * sizeof(unsigned long),
-								GFP_KERNEL);
+	sync_bitmap = kzalloc(BITS_TO_LONGS(nr_entries) *
+					sizeof(unsigned long), GFP_KERNEL);
 	if (!sync_bitmap) {
 		pr_err("pblk: cannot allocate sync_bitmap for block\n");
 		return NULL;
@@ -706,6 +751,7 @@ static void pblk_close_rblk_queue(struct work_struct *work)
 
 	pblk_close_rblk(pblk, rblk);
 	kfree(rblk->sync_bitmap);
+	rblk->sync_bitmap = NULL;
 	mempool_free(gcb, pblk->gcb_pool);
 }
 
@@ -766,50 +812,16 @@ static inline u64 pblk_current_pg(struct pblk *pblk, struct pblk_block *rblk)
 }
 #endif
 
-/* Simple round-robin Logical to physical address translation.
- *
- * Retrieve the mapping using the active append point. Then update the ap for
- * the next write to the disk. Mapping occurs at a page granurality, i.e., if a
- * page is 4 sectors, then each map entails 4 lba-ppa mappings - @nr_secs is the
- * number of sectors in the page, taking number of planes also into
- * consideration
- *
- * TODO: We are missing GC path
- * TODO: Add support for MLC and TLC padding. For now only supporting SLC
- */
-static int pblk_map_page(struct pblk *pblk, unsigned int sentry,
-			struct ppa_addr *ppa_list,
-			struct pblk_sec_meta *meta_list,
-			unsigned int nr_secs, unsigned int valid_secs,
-			int prov)
+static int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
+				unsigned int sentry, struct ppa_addr *ppa_list,
+				struct pblk_sec_meta *meta_list,
+				unsigned int nr_secs, unsigned int valid_secs)
 {
 	struct nvm_dev *dev = pblk->dev;
-	struct pblk_lun *rlun;
-	struct pblk_block *rblk;
 	struct pblk_w_ctx *w_ctx;
-	struct nvm_lun *lun;
 	u64 *lba_list;
 	u64 paddr;
-	int is_gc = 0; //TODO: Fix for now
 	int i;
-	int ret = 0;
-
-	rlun = pblk_get_lun_rr(pblk, is_gc);
-	lun = rlun->parent;
-
-	/* TODO: This should follow a richer heuristic */
-	if (lun->nr_free_blocks < pblk->nr_luns * 4) {
-		//XXX: Other?
-		ret = -ENOSPC;
-		goto out;
-	}
-
-	/* This lock protects the allocation within a block, so we only need to
-	 * take it when pblk_alloc_addr is being called. No need to protect the
-	 * l2p table update, since it has its own lock for it.
-	 */
-	spin_lock(&rlun->lock);
-	rblk = rlun->cur;
 
 	lba_list = pblk_rlpg_to_llba(rblk->rlpg);
 
@@ -821,8 +833,7 @@ static int pblk_map_page(struct pblk *pblk, unsigned int sentry,
 			 * LUN when the current block is full.
 			 */
 			pr_err("pblk: corrupted l2p mapping\n");
-			ret = -EINVAL;
-			goto out;
+			return -EINVAL;
 		}
 
 		/* TODO: Implement GC path with emergency blocks */
@@ -852,10 +863,53 @@ static int pblk_map_page(struct pblk *pblk, unsigned int sentry,
 							addr_to_ppa(paddr));
 		}
 	}
+
+	return 0;
+}
+
+/* Simple round-robin Logical to physical address translation.
+ *
+ * Retrieve the mapping using the active append point. Then update the ap for
+ * the next write to the disk. Mapping occurs at a page granurality, i.e., if a
+ * page is 4 sectors, then each map entails 4 lba-ppa mappings - @nr_secs is the
+ * number of sectors in the page, taking number of planes also into
+ * consideration
+ *
+ * TODO: We are missing GC path
+ * TODO: Add support for MLC and TLC padding. For now only supporting SLC
+ */
+static int pblk_map_rr_page(struct pblk *pblk, unsigned int sentry,
+				struct ppa_addr *ppa_list,
+				struct pblk_sec_meta *meta_list,
+				unsigned int nr_secs, unsigned int valid_secs)
+{
+	struct pblk_lun *rlun;
+	struct pblk_block *rblk;
+	struct nvm_lun *lun;
+	int is_gc = 0; //TODO: Fix for now
+	int ret = 0;
+
+	rlun = pblk_get_lun_rr(pblk, is_gc);
+	lun = rlun->parent;
+
+	/* TODO: This should follow a richer heuristic */
+	if (lun->nr_free_blocks < pblk->nr_luns * 4) {
+		//XXX: Other?
+		ret = -ENOSPC;
+		goto out;
+	}
+
+	spin_lock(&rlun->lock);
+	rblk = rlun->cur;
+	ret = pblk_map_page(pblk, rblk, sentry, ppa_list, meta_list,
+							nr_secs, valid_secs);
 	spin_unlock(&rlun->lock);
 
+	if (ret)
+		goto out;
+
 	/* Prepare block for next write */
-	if (prov && block_is_full(pblk, rblk)) {
+	if (block_is_full(pblk, rblk)) {
 		rblk = pblk_get_blk(pblk, rlun, 0);
 		if (!rblk) {
 			pr_err("pblk: cannot allocate new block\n");
@@ -886,6 +940,20 @@ static void pblk_sync_buffer(struct pblk *pblk, struct pblk_addr p, int flags)
 		pblk_run_gc(pblk, rblk, pblk_close_rblk_queue);
 }
 
+static void pblk_end_w_pad(struct pblk *pblk, struct nvm_rq *rqd,
+							struct pblk_ctx *ctx)
+{
+	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
+
+	BUG_ON(c_ctx->nr_entries != 0);
+
+	if (c_ctx->nr_padded > 1)
+		nvm_dev_dma_free(pblk->dev, rqd->ppa_list, rqd->dma_ppa_list);
+
+	bio_put(rqd->bio);
+	mempool_free(rqd, pblk->w_rq_pool);
+}
+
 static unsigned long pblk_end_w_bio(struct pblk *pblk, struct nvm_rq *rqd,
 							struct pblk_ctx *ctx)
 {
@@ -898,7 +966,6 @@ static unsigned long pblk_end_w_bio(struct pblk *pblk, struct nvm_rq *rqd,
 
 	BUG_ON(rqd->nr_ppas != (nr_entries + c_ctx->nr_padded));
 
-	/* Complete original bios */
 	for (i = 0; i < nr_entries; i++) {
 		w_ctx = pblk_rb_w_ctx(&pblk->rwb, c_ctx->sentry + i);
 		pblk_sync_buffer(pblk, w_ctx->ppa, w_ctx->flags);
@@ -972,8 +1039,10 @@ static void pblk_end_io_write(struct pblk *pblk, struct nvm_rq *rqd)
 	c_ctx = ctx->c_ctx;
 	BUG_ON(rqd->nr_ppas != (c_ctx->nr_entries + c_ctx->nr_padded));
 
-	pblk_compl_queue(pblk, rqd, ctx);
+	if (ctx->flags & NVM_IOTYPE_PAD)
+		return pblk_end_w_pad(pblk, rqd, ctx);
 
+	pblk_compl_queue(pblk, rqd, ctx);
 	pblk_writer_kick(pblk);
 }
 
@@ -1530,19 +1599,11 @@ static blk_qc_t pblk_make_rq(struct request_queue *q, struct bio *bio)
 	return BLK_QC_T_NONE;
 }
 
-static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
-							struct pblk_ctx *ctx)
+static int __pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
+						struct pblk_ctx *ctx,
+						unsigned int nr_secs)
 {
 	struct nvm_dev *dev = pblk->dev;
-	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
-	unsigned int valid_secs= c_ctx->nr_entries;
-	unsigned int padded_secs = c_ctx->nr_padded;
-	unsigned int nr_secs = valid_secs + padded_secs;
-	struct pblk_sec_meta *meta;
-	unsigned int cur_valid_secs;
-	int min = pblk->min_write_pgs;
-	int i;
-	int ret = 0;
 
 	/* Setup write request */
 	rqd->opcode = NVM_OP_PWRITE;
@@ -1564,8 +1625,7 @@ static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		break;
 	default:
 		pr_err("pblk: invalid plane configuration\n");
-		ret = -EINVAL;
-		goto out;
+		return -EINVAL;
 	}
 
 	rqd->meta_list = nvm_dev_dma_alloc(pblk->dev, GFP_KERNEL,
@@ -1573,13 +1633,43 @@ static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 	if (!rqd->meta_list) {
 		nvm_dev_dma_free(pblk->dev, rqd->ppa_list, rqd->dma_ppa_list);
 		pr_err("pblk: not able to allocate metadata list\n");
-		ret = -ENOMEM;
+		return -ENOMEM;
 	}
 
-	/* Treat generic metadata with pblk metadata format */
+	if (unlikely(nr_secs == 1))
+		return 0;
+
+	rqd->ppa_list = nvm_dev_dma_alloc(pblk->dev, GFP_KERNEL,
+							&rqd->dma_ppa_list);
+	if (!rqd->ppa_list) {
+		pr_err("pblk: not able to allocate ppa list\n");
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
+							struct pblk_ctx *ctx)
+{
+	struct nvm_dev *dev = pblk->dev;
+	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
+	unsigned int valid_secs = c_ctx->nr_entries;
+	unsigned int padded_secs = c_ctx->nr_padded;
+	unsigned int nr_secs = valid_secs + padded_secs;
+	struct pblk_sec_meta *meta;
+	unsigned int cur_valid_secs;
+	int min = pblk->min_write_pgs;
+	int i;
+	int ret = 0;
+
+	ret = __pblk_setup_w_rq(pblk, rqd, ctx, nr_secs);
+	if (ret)
+		goto out;
+
 	meta = rqd->meta_list;
 
-	if (nr_secs == 1) {
+	if (unlikely(nr_secs == 1)) {
 		/*
 		 * Single sector path - this path is highly improbable since
 		 * controllers typically deal with multi-sector and multi-plane
@@ -1588,8 +1678,8 @@ static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		BUG_ON(dev->sec_per_pl != 1);
 		BUG_ON(padded_secs != 0);
 
-		ret = pblk_map_page(pblk, c_ctx->sentry, &rqd->ppa_addr,
-							&meta[0], 1, 1, 1);
+		ret = pblk_map_rr_page(pblk, c_ctx->sentry, &rqd->ppa_addr,
+								&meta[0], 1, 1);
 		if (ret) {
 			/*
 			 * TODO:  There is no more available pages, we need to
@@ -1601,20 +1691,82 @@ static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		goto out;
 	}
 
-	/* This bio will contain several ppas */
-	rqd->ppa_list = nvm_dev_dma_alloc(pblk->dev, GFP_KERNEL,
-							&rqd->dma_ppa_list);
-	if (!rqd->ppa_list) {
-		pr_err("pblk: not able to allocate ppa list\n");
-		ret = -ENOMEM;
+	for (i = 0; i < nr_secs; i += min) {
+		cur_valid_secs = (i + min > valid_secs) ?
+						(valid_secs % min) : min;
+		ret = pblk_map_rr_page(pblk, c_ctx->sentry + i,
+						&rqd->ppa_list[i],
+						&meta[i], min, cur_valid_secs);
+		if (ret) {
+			/*
+			 * TODO:  There is no more available pages, we need to
+			 * recover. Probably a requeue of the bio is enough.
+			 */
+			BUG_ON(1);
+		}
+	}
+
+#ifdef CONFIG_NVM_DEBUG
+	if (nvm_boundary_checks(dev, rqd->ppa_list, rqd->nr_ppas))
+		WARN_ON(1);
+#endif
+
+out:
+	return ret;
+}
+
+static int pblk_setup_pad_rq(struct pblk *pblk, struct pblk_block *rblk,
+				struct nvm_rq *rqd, struct pblk_ctx *ctx)
+{
+	struct nvm_dev *dev = pblk->dev;
+	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
+	unsigned int valid_secs = c_ctx->nr_entries;
+	unsigned int padded_secs = c_ctx->nr_padded;
+	struct pblk_lun *rlun = rblk->rlun;
+	unsigned int nr_secs = valid_secs + padded_secs;
+	struct pblk_sec_meta *meta;
+	int min = pblk->min_write_pgs;
+	int i;
+	int ret = 0;
+
+	ret = __pblk_setup_w_rq(pblk, rqd, ctx, nr_secs);
+	if (ret)
+		goto out;
+
+	meta = rqd->meta_list;
+
+	if (unlikely(nr_secs == 1)) {
+		/*
+		 * Single sector path - this path is highly improbable since
+		 * controllers typically deal with multi-sector and multi-plane
+		 * pages. This path is though useful for testing on QEMU
+		 */
+		BUG_ON(dev->sec_per_pl != 1);
+		BUG_ON(padded_secs != 0);
+
+		spin_lock(&rlun->lock);
+		ret = pblk_map_page(pblk, rblk, c_ctx->sentry, &rqd->ppa_addr,
+								&meta[0], 1, 0);
+		spin_unlock(&rlun->lock);
+
+		if (ret) {
+			/*
+			 * TODO:  There is no more available pages, we need to
+			 * recover. Probably a requeue of the bio is enough.
+			 */
+			BUG_ON(1);
+		}
+
 		goto out;
 	}
 
 	for (i = 0; i < nr_secs; i += min) {
-		cur_valid_secs = (i + min > valid_secs) ?
-						(valid_secs % min) : min;
-		ret = pblk_map_page(pblk, c_ctx->sentry + i, &rqd->ppa_list[i],
-					&meta[i], min, cur_valid_secs, 1);
+		spin_lock(&rlun->lock);
+		ret = pblk_map_page(pblk, rblk, c_ctx->sentry + i,
+						&rqd->ppa_list[i],
+						&meta[i], min, 0);
+		spin_unlock(&rlun->lock);
+
 		if (ret) {
 			/*
 			 * TODO:  There is no more available pages, we need to
@@ -1835,6 +1987,12 @@ static int pblk_map_init(struct pblk *pblk)
 	return 0;
 }
 
+static void pblk_rwb_free(struct pblk *pblk)
+{
+	vfree(pblk_rb_data_ref(&pblk->rwb));
+	vfree(pblk_rb_entries_ref(&pblk->rwb));
+}
+
 static int pblk_rwb_init(struct pblk *pblk)
 {
 	struct nvm_dev *dev = pblk->dev;
@@ -1977,6 +2135,7 @@ static void pblk_core_free(struct pblk *pblk)
 	mempool_destroy(pblk->page_pool);
 	mempool_destroy(pblk->gcb_pool);
 	mempool_destroy(pblk->r_rq_pool);
+	mempool_destroy(pblk->w_rq_pool);
 }
 
 static void pblk_luns_free(struct pblk *pblk)
@@ -2135,20 +2294,150 @@ static void pblk_flush_writer(struct pblk *pblk)
 	bio_put(bio);
 }
 
+static void pblk_pad_blk(struct pblk *pblk, struct pblk_block *rblk,
+							int nr_free_secs)
+{
+	struct nvm_dev *dev = pblk->dev;
+	struct bio *bio;
+	struct nvm_rq *rqd;
+	struct pblk_ctx *ctx;
+	struct pblk_compl_ctx *c_ctx;
+	void *pad_data;
+	unsigned int bio_len;
+	int nr_secs, err;
+
+	pad_data = kzalloc(pblk->max_write_pgs * dev->sec_size, GFP_ATOMIC);
+	if (!pad_data) {
+		pr_err("pblk: could not allocate tear down pad data\n");
+		return;
+	}
+
+	do {
+		nr_secs = (nr_free_secs > pblk->max_write_pgs) ?
+					pblk->max_write_pgs : nr_free_secs;
+
+		rqd = mempool_alloc(pblk->w_rq_pool, GFP_ATOMIC);
+		if (!rqd) {
+			pr_err("pblk: could not alloc write req.\n ");
+			goto free_pad_data;
+		}
+		memset(rqd, 0, pblk_w_rq_size);
+		ctx = pblk_set_ctx(pblk, rqd);
+		c_ctx = ctx->c_ctx;
+
+		bio_len = nr_secs * dev->sec_size;
+		bio = bio_map_kern(dev->q, pad_data, bio_len, GFP_ATOMIC);
+		if (!bio) {
+			pr_err("pblk: could not alloc tear down bio\n");
+			goto free_rqd;
+		}
+		bio_get(bio);
+
+		bio->bi_iter.bi_sector = 0; /* artificial bio */
+		bio->bi_rw = WRITE;
+		rqd->bio = bio;
+
+		ctx->flags = NVM_IOTYPE_PAD;
+		c_ctx->sentry = 0;
+		c_ctx->nr_entries = 0;
+		c_ctx->nr_padded = nr_secs;
+
+		if (pblk_setup_pad_rq(pblk, rblk, rqd, ctx)) {
+			pr_err("pblk: could not setup tear down req.\n");
+			goto free_bio;
+		}
+
+		err = nvm_submit_io(dev, rqd);
+		if (err) {
+			pr_err("pblk: I/O submission failed: %d\n", err);
+			goto free_bio;
+		}
+
+		nr_free_secs -= nr_secs;
+	} while (nr_free_secs > 0);
+
+	kfree(pad_data);
+	return;
+
+free_bio:
+	bio_put(bio);
+free_rqd:
+	mempool_free(rqd, pblk->w_rq_pool);
+free_pad_data:
+	kfree(pad_data);
+}
+
+/*
+ * XXX: For now, we pad the whole block. In the future, pad only the pages that
+ * are needed to guarantee that future reads will come, and delegate bringing up
+ * the block for writing to the bring up recovery. Basically, this means
+ * implementing l2p snapshot and in case of power failure, if a block belongs
+ * to a target and it is not closed, scan the OOB area for each page to
+ * recover the state of the block. There should only be NUM_LUNS active blocks
+ * at any moment in time.
+ */
+static void pblk_pad_open_blks(struct pblk *pblk)
+{
+	struct pblk_lun *rlun;
+	struct pblk_block *rblk, *trblk;
+	unsigned int i, mod;
+	int nr_free_secs;
+
+	pblk_for_each_lun(pblk, rlun, i) {
+		spin_lock(&rlun->lock_lists);
+		list_for_each_entry_safe(rblk, trblk, &rlun->open_list, list) {
+			nr_free_secs = pblk_nr_free_secs(pblk, rblk);
+			div_u64_rem(nr_free_secs, pblk->min_write_pgs, &mod);
+			if (mod) {
+				pr_err("pblk: corrupted block\n");
+				continue;
+			}
+
+			pr_debug("pblk: padding %d sectors in blk:%lu\n",
+						nr_free_secs, rblk->parent->id);
+
+			/* empty block - no need for padding */
+			if (nr_free_secs == pblk->nr_blk_dsecs) {
+				__pblk_put_blk(pblk, rblk);
+				continue;
+			}
+
+			pblk_pad_blk(pblk, rblk, nr_free_secs);
+		}
+		spin_unlock(&rlun->lock_lists);
+	}
+
+try:
+	/* Wait until all padding I/Os complete */
+	pblk_for_each_lun(pblk, rlun, i) {
+		spin_lock(&rlun->lock_lists);
+		if (!list_empty(&rlun->open_list)) {
+			spin_unlock(&rlun->lock_lists);
+			schedule();
+			goto try;
+		}
+		spin_unlock(&rlun->lock_lists);
+	}
+}
+
 static void pblk_tear_down(struct pblk *pblk)
 {
 	pblk_flush_writer(pblk);
-
+	pblk_pad_open_blks(pblk);
 	pblk_rb_sync_l2p(&pblk->rwb);
+	pblk_rwb_free(pblk);
+
 	if (pblk_rb_tear_down_check(&pblk->rwb)) {
-		pr_err("pblk: write buffer error on teardown\n");
+		pr_err("pblk: write buffer error on tear down\n");
 		return;
 	}
+
+	/* TODO: Stop GC before freeing blocks */
+	pblk_free_blks(pblk);
 
 	pr_debug("pblk: consistent tear down\n");
 
 	/* TODO:
-	 *  - Write X sectors to guarantee readability of written data
 	 *  - Save FTL snapshot for fast recovery
 	 */
 }
@@ -2157,14 +2446,13 @@ static void pblk_exit(void *private)
 {
 	struct pblk *pblk = private;
 
+	down_write(&pblk_lock);
 	del_timer(&pblk->gc_timer);
-
 	flush_workqueue(pblk->krqd_wq);
 	flush_workqueue(pblk->kgc_wq);
-
 	pblk_tear_down(pblk);
-
 	pblk_free(pblk);
+	up_write(&pblk_lock);
 }
 
 static sector_t pblk_capacity(void *private)
@@ -2483,9 +2771,10 @@ static void pblk_print_debug(void *private)
 		spin_lock(&rlun->lock_lists);
 		list_for_each_entry(rblk, &rlun->open_list, list) {
 			spin_lock(&rblk->lock);
-			pr_info("pblk:open:\tblk:%lu\t%u/%u\t%u\t%u\t%u\n",
+			pr_info("pblk:open:\tblk:%lu\t%u\t%u\t%u\t%u\t%u\t%u\n",
 					rblk->parent->id,
 					pblk->dev->sec_per_blk,
+					pblk->nr_blk_dsecs,
 					bitmap_weight(rblk->pages,
 							pblk->dev->sec_per_blk),
 					bitmap_weight(rblk->sync_bitmap,

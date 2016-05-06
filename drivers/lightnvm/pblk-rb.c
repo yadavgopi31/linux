@@ -71,6 +71,16 @@ int pblk_rb_init(struct pblk_rb *rb, struct pblk_rb_entry *rb_entry_base,
 	return 0;
 }
 
+void *pblk_rb_data_ref(struct pblk_rb *rb)
+{
+	return rb->data;
+}
+
+void *pblk_rb_entries_ref(struct pblk_rb *rb)
+{
+	return rb->entries;
+}
+
 /* Copy data to ring buffer. It handles wrap around */
 static void memcpy_torb(struct pblk_rb *rb, void *buf, void *data,
 								unsigned size)
@@ -585,6 +595,9 @@ int pblk_rb_tear_down_check(struct pblk_rb *rb)
 				(rb->sync_point == RB_EMPTY_ENTRY)) {
 		goto out;
 	}
+
+	if (rb->entries || rb->data)
+		goto out;
 
 	ret = 1;
 

@@ -301,6 +301,8 @@ struct pblk_block_gc {
 int pblk_rb_init(struct pblk_rb *rb, struct pblk_rb_entry *rb_entry_base,
 			void *rb_data_base, unsigned long grace_area_sz,
 			unsigned int power_size, unsigned int power_seg_sz);
+void *pblk_rb_data_ref(struct pblk_rb *rb);
+void *pblk_rb_entries_ref(struct pblk_rb *rb);
 int pblk_rb_write_entry(struct pblk_rb *rb, void *data, struct pblk_w_ctx w_ctx,
 							unsigned int pos);
 unsigned long pblk_rb_write_init(struct pblk_rb *rb);
