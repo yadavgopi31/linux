@@ -104,16 +104,16 @@ static int block_is_full(struct pblk *pblk, struct pblk_block *rblk)
 	return (bitmap_full(rblk->pages, pblk->nr_blk_dsecs));
 }
 
-static inline u64 pblk_next_free_pg(struct pblk *pblk, struct pblk_block *rblk)
+static inline u64 pblk_next_free_sec(struct pblk *pblk, struct pblk_block *rblk)
 {
-	u64 free_page;
+	u64 free_sec;
 
 	lockdep_assert_held(&rblk->lock);
 
-	free_page = find_first_zero_bit(rblk->pages, pblk->nr_blk_dsecs);
-	WARN_ON(test_and_set_bit(free_page, rblk->pages));
+	free_sec = find_first_zero_bit(rblk->pages, pblk->nr_blk_dsecs);
+	WARN_ON(test_and_set_bit(free_sec, rblk->pages));
 
-	return free_page;
+	return free_sec;
 }
 
 /* requires lun->lock taken */
@@ -746,7 +746,7 @@ static u64 pblk_alloc_addr(struct pblk *pblk, struct pblk_block *rblk)
 	if (block_is_full(pblk, rblk))
 		goto out;
 
-	addr = pblk_next_free_pg(pblk, rblk);
+	addr = pblk_next_free_sec(pblk, rblk);
 
 out:
 	spin_unlock(&rblk->lock);
