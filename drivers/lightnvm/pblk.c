@@ -847,11 +847,6 @@ static int pblk_map_page(struct pblk *pblk, unsigned int sentry,
 							addr_to_ppa(paddr));
 		}
 	}
-
-#ifdef CONFIG_NVM_DEBUG
-	if (nvm_boundary_checks(dev, ppa_list, nr_secs))
-		WARN_ON(1);
-#endif
 	spin_unlock(&rlun->lock);
 
 	/* Prepare block for next write */
@@ -1623,6 +1618,11 @@ static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 			BUG_ON(1);
 		}
 	}
+
+#ifdef CONFIG_NVM_DEBUG
+	if (nvm_boundary_checks(dev, rqd->ppa_list, rqd->nr_ppas))
+		WARN_ON(1);
+#endif
 
 out:
 	return ret;
