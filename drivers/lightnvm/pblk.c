@@ -597,6 +597,9 @@ static void pblk_lun_gc(struct work_struct *work)
 
 		BUG_ON(!block_is_full(pblk, rblk));
 
+		/* We can free page bitmap at this point */
+		kfree(rblk->pages);
+
 		pr_debug("pblk: selected block '%lu' for GC\n", block->id);
 		/* printk(KERN_CRIT "pblk: selected block '%lu' for GC\n", block->id); */
 
@@ -702,6 +705,7 @@ static void pblk_close_rblk_queue(struct work_struct *work)
 	struct pblk_block *rblk = gcb->rblk;
 
 	pblk_close_rblk(pblk, rblk);
+	kfree(rblk->sync_bitmap);
 	mempool_free(gcb, pblk->gcb_pool);
 }
 
