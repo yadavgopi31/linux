@@ -2214,7 +2214,6 @@ static int pblk_block_map_recover_blk(struct pblk *pblk,
 		ret = -1;
 		goto free_bio_data;
 	}
-	bio_get(bio);
 
 	rqd = mempool_alloc(pblk->r_rq_pool, GFP_KERNEL);
 	if (!rqd) {
