@@ -2569,9 +2569,16 @@ static int pblk_block_map_recover_blk(struct pblk *pblk,
 	bppa = global_addr(pblk, rblk, 0);
 	lba_list = pblk_rlpg_to_llba(rlpg);
 	printk(KERN_CRIT "RECOVER BLK:%lu,\n", rblk->parent->id);
+	/* TODO: We need gennvm to give us back the blocks that we owe so that
+	 * we can bring up the data structures before we populate them
+	 *  - all bitmaps
+	 *  - GC
+	 */
 	for (i = 0; i < pblk->nr_blk_dsecs; i++) {
 		ppa = addr_to_ppa(bppa + i);
-		pblk_update_map(pblk, lba_list[i], rblk, ppa);
+		if (lba_list[i] != ADDR_EMPTY)
+			pblk_update_map(pblk, lba_list[i], rblk, ppa);
+		/*else - mark as invalid */
 	}
 
 free_rqd:
