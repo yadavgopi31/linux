@@ -1079,13 +1079,13 @@ static void pblk_end_io(struct nvm_rq *rqd)
 	struct pblk *pblk = container_of(rqd->ins, struct pblk, instance);
 	uint8_t nr_secs = rqd->nr_ppas;
 
-	if (rqd->meta_list)
-		nvm_dev_dma_free(pblk->dev, rqd->meta_list, rqd->dma_meta_list);
-
 	if (bio_data_dir(rqd->bio) == READ)
 		pblk_end_io_read(pblk, rqd, nr_secs);
 	else
 		pblk_end_io_write(pblk, rqd);
+
+	if (rqd->meta_list)
+		nvm_dev_dma_free(pblk->dev, rqd->meta_list, rqd->dma_meta_list);
 }
 
 /*
