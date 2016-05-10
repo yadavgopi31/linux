@@ -280,19 +280,15 @@ try:
 	spin_unlock(&rlun->lock_lists);
 
 	if (nvm_erase_blk(dev, rblk->parent)) {
-		/*FIXME: For now put it back to the pool. This block should be
-		 * marked as a bad block most probably
-		 */
-		spin_lock(&lun->lock);
-		nvm_put_blk_unlocked(pblk->dev, rblk->parent);
-		spin_unlock(&lun->lock);
-
-		spin_lock(&rlun->lock_lists);
-		list_del(&rblk->list);
-		spin_unlock(&rlun->lock_lists);
+		struct ppa_addr ppa;
 
 		pr_err("pblk: error while erasing block:%lu. Retry\n",
 							rblk->parent->id);
+
+		/* Mark block as bad and return it to media manager */
+		ppa = pblk_ppa_to_gaddr(dev, block_to_addr(pblk, rblk));
+		nvm_mark_blk(dev, ppa, NVM_BLK_ST_BAD);
+		pblk_put_blk(pblk, rblk);
 
 		goto try;
 	}
