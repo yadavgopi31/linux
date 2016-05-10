@@ -210,6 +210,12 @@ void nvm_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 }
 EXPORT_SYMBOL(nvm_put_blk);
 
+void nvm_mark_blk(struct nvm_dev *dev, struct ppa_addr ppa, int type)
+{
+	return dev->mt->mark_blk(dev, ppa, type);
+}
+EXPORT_SYMBOL(nvm_mark_blk);
+
 #ifdef CONFIG_NVM_DEBUG
 int nvm_boundary_checks(struct nvm_dev *dev, struct ppa_addr *ppas, int nr_ppas)
 {
