@@ -110,4 +110,8 @@ struct gennvm_sys_record {
 	__be64		ppa;
 };
 
+/* gennvm-bmi.c */
+extern int gennvm_bmi_init(struct gen_nvm *);
+extern void gennvm_bmi_free(struct gen_nvm *);
+
 #endif /* GENNVM_H_ */
