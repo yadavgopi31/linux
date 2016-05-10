@@ -950,8 +950,7 @@ static void pblk_end_w_pad(struct pblk *pblk, struct nvm_rq *rqd,
 	mempool_free(rqd, pblk->w_rq_pool);
 }
 
-static unsigned long pblk_end_w_bio(struct pblk *pblk, struct nvm_rq *rqd,
-							struct pblk_ctx *ctx)
+static unsigned long pblk_end_w_bio(struct pblk *pblk, struct pblk_ctx *ctx)
 {
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 	struct pblk_w_ctx *w_ctx;
@@ -959,8 +958,6 @@ static unsigned long pblk_end_w_bio(struct pblk *pblk, struct nvm_rq *rqd,
 	int nr_entries = c_ctx->nr_entries;
 	unsigned long ret;
 	int i;
-
-	BUG_ON(rqd->nr_ppas != (nr_entries + c_ctx->nr_padded));
 
 	for (i = 0; i < nr_entries; i++) {
 		w_ctx = pblk_rb_w_ctx(&pblk->rwb, c_ctx->sentry + i);
@@ -976,21 +973,30 @@ static unsigned long pblk_end_w_bio(struct pblk *pblk, struct nvm_rq *rqd,
 
 	ret = pblk_rb_sync_advance(&pblk->rwb, nr_entries);
 
+	return ret;
+}
+
+static void pblk_end_w_bio_free(struct pblk *pblk, struct nvm_rq *rqd,
+								int nr_entries)
+{
 	if (nr_entries > 1)
 		nvm_dev_dma_free(pblk->dev, rqd->ppa_list, rqd->dma_ppa_list);
 
 	bio_put(rqd->bio);
 	mempool_free(rqd, pblk->w_rq_pool);
-
-	return ret;
 }
 
 static unsigned long pblk_end_queued_w_bio(struct pblk *pblk,
 				struct nvm_rq *rqd, struct pblk_ctx *ctx)
 {
-	list_del(&ctx->list);
+	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
+	unsigned long ret;
 
-	return pblk_end_w_bio(pblk, rqd, ctx);
+	list_del(&ctx->list);
+	ret = pblk_end_w_bio(pblk, ctx);
+	pblk_end_w_bio_free(pblk, rqd, c_ctx->nr_entries);
+
+	return ret;
 }
 
 static void pblk_compl_queue(struct pblk *pblk, struct nvm_rq *rqd,
@@ -1004,7 +1010,10 @@ static void pblk_compl_queue(struct pblk *pblk, struct nvm_rq *rqd,
 	pos = pblk_rb_sync_init(&pblk->rwb, &flags);
 
 	if (c_ctx->sentry == pos) {
-		pos = pblk_end_w_bio(pblk, rqd, ctx);
+		pos = pblk_end_w_bio(pblk, ctx);
+
+		/* Free current request */
+		pblk_end_w_bio_free(pblk, rqd, c_ctx->nr_entries);
 
 try:
 		list_for_each_entry_safe(c, r, &pblk->compl_list, list) {
