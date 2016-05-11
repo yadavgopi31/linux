@@ -62,7 +62,7 @@ struct pblk_sec_meta {
 	u64 reserved;
 };
 
-struct pblk_l2p_lock {
+struct pblk_locked_list {
 	struct list_head lock_list;
 	spinlock_t lock;
 };
@@ -82,7 +82,7 @@ struct pblk_addr {
 /* Completion context */
 struct pblk_compl_ctx {
 	unsigned int sentry;
-	unsigned int nr_entries;
+	unsigned int nr_valid;
 	unsigned int nr_padded;
 };
 
@@ -93,7 +93,7 @@ struct pblk_compl_close_ctx {
 struct pblk_ctx {
 	struct list_head list;		/* Head for out-of-order completion */
 	void *c_ctx;			/* Completion context */
-	int flags;			/* Read context flags */
+	int flags;			/* Context flags */
 };
 
 /* Read context */
@@ -111,6 +111,14 @@ struct pblk_w_ctx {
 	sector_t lba;			/* Logic addr. associated with entry */
 	struct pblk_addr ppa;		/* Physic addr. associated with entry */
 	int flags;			/* Write context flags */
+};
+
+/* Recovery context */
+struct pblk_rec_ctx {
+	struct pblk *pblk;
+	struct nvm_rq *rqd;
+	struct pblk_locked_list list;
+	struct work_struct ws_rec;
 };
 
 struct pblk_rb_entry {
@@ -264,6 +272,7 @@ struct pblk {
 	atomic_t compl_writes;		/* Sectors completed in write bio */
 	atomic_t inflight_reads;	/* Inflight sector read requests */
 	atomic_t sync_reads;		/* Completed sector read requests */
+	atomic_t recov_writes;		/* Sectors submitted from recovery */
 #endif
 
 	spinlock_t bio_lock;
@@ -276,12 +285,14 @@ struct pblk {
 	 * addresses are used when writing to the disk block device.
 	 */
 	struct pblk_addr *trans_map;
-	struct pblk_l2p_lock l2p_locks;
+	struct pblk_locked_list l2p_locks;
 
 	struct list_head compl_list;
+	struct list_head recovery_list;
 
 	mempool_t *page_pool;
 	mempool_t *gcb_pool;
+	mempool_t *rec_pool;
 	mempool_t *r_rq_pool;
 	mempool_t *w_rq_pool;
 
@@ -329,6 +340,8 @@ void pblk_rb_sync_end(struct pblk_rb *rb, unsigned long flags);
 int pblk_rb_sync_point_set(struct pblk_rb *rb, struct bio *bio);
 unsigned long pblk_rb_sync_point_count(struct pblk_rb *rb);
 void pblk_rb_sync_point_reset(struct pblk_rb *rb, unsigned long sp);
+struct pblk_w_ctx *pblk_rb_sync_scan_entry(struct pblk_rb *rb,
+						struct ppa_addr *ppa);
 unsigned long pblk_rb_space(struct pblk_rb *rb);
 unsigned long pblk_rb_count(struct pblk_rb *rb);
 int pblk_rb_tear_down_check(struct pblk_rb *rb);

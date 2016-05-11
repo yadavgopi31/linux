@@ -459,8 +459,11 @@ static void gennvm_end_io(struct nvm_rq *rqd)
 {
 	struct nvm_tgt_instance *ins = rqd->ins;
 
-	if (rqd->error == NVM_RSP_ERR_FAILWRITE)
-		gennvm_mark_blk_bad(rqd->dev, rqd);
+	/* Target is responsible to deal with errors and mark bad blocks
+	 * consequently.
+	 */
+	/* if (rqd->error == NVM_RSP_ERR_FAILWRITE) */
+		/* gennvm_mark_blk_bad(rqd->dev, rqd); */
 
 	ins->tt->end_io(rqd);
 }

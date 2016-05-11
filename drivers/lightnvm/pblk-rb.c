@@ -414,7 +414,7 @@ unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct bio *bio,
 	/* memcpy_fromrb(rb, buf, entry->data, size); */
 
 	c_ctx->sentry = subm;
-	c_ctx->nr_entries = to_read;
+	c_ctx->nr_valid = to_read;
 	c_ctx->nr_padded = pad;
 
 	/* XXX: Read one entry at a time for now */
@@ -579,6 +579,40 @@ unsigned long pblk_rb_sync_point_count(struct pblk_rb *rb)
 	count = pblk_rb_ring_count(sync_point, subm, rb->nr_entries) + 1;
 
 	return count;
+}
+
+/*
+ * Scan from the current position of the sync pointer to find the entry that
+ * corresponds to the given ppa. The assumption is that the ppa is close to the
+ * sync pointer thus the search will not take long.
+ *
+ * The caller of this function must guarantee that the sync pointer will no
+ * reach the entry while it is using the metadata associated with it. With this
+ * assumption in mind, there is no need to take the sync lock.
+ */
+struct pblk_w_ctx *pblk_rb_sync_scan_entry(struct pblk_rb *rb,
+						struct ppa_addr *ppa)
+{
+	struct pblk_rb_entry *entry;
+	struct pblk_w_ctx *w_ctx;
+	unsigned long sync_point, subm, count;
+	unsigned long i;
+
+	sync_point = READ_ONCE(rb->sync_point);
+	subm = READ_ONCE(rb->subm);
+	count = pblk_rb_ring_count(sync_point, subm, rb->nr_entries) + 1;
+
+	for (i = 0; i < count; i++) {
+		entry = &rb->entries[sync_point];
+		w_ctx = &entry->w_ctx;
+
+		if (w_ctx->ppa.ppa.ppa == w_ctx->ppa.ppa.ppa)
+			return w_ctx;
+
+		sync_point = (sync_point + 1) & (rb->nr_entries - 1);
+	}
+
+	return NULL;
 }
 
 int pblk_rb_tear_down_check(struct pblk_rb *rb)
