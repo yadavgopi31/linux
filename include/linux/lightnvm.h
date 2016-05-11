@@ -270,6 +270,7 @@ struct nvm_lun {
 	int lun_id;
 	int chnl_id;
 
+	struct ppa_addr ppa;
 	/* It is up to the target to mark blocks as closed. If the target does
 	 * not do it, all blocks are marked as open, and nr_open_blocks
 	 * represents the number of blocks in use

@@ -125,6 +125,10 @@ static int gennvm_luns_init(struct nvm_dev *dev, struct gen_nvm *gn)
 		lun->vlun.nr_open_blocks = 0;
 		lun->vlun.nr_closed_blocks = 0;
 		lun->vlun.nr_bad_blocks = 0;
+
+		lun->vlun.ppa.ppa = 0;
+		lun->vlun.ppa.g.lun = lun->vlun.lun_id;
+		lun->vlun.ppa.g.ch = lun->vlun.chnl_id;
 	}
 	return 0;
 }
@@ -301,7 +305,6 @@ static int gennvm_register(struct nvm_dev *dev)
 	gn->dev = dev;
 	gn->nr_luns = dev->nr_luns;
 	INIT_LIST_HEAD(&gn->area_list);
-	INIT_LIST_HEAD(&gn->bmi_blk_list);
 	dev->mp = gn;
 
 	ret = gennvm_luns_init(dev, gn);
@@ -341,6 +344,8 @@ static struct nvm_block *gennvm_get_blk_unlocked(struct nvm_dev *dev,
 	struct gen_lun *lun = container_of(vlun, struct gen_lun, vlun);
 	struct nvm_block *blk = NULL;
 	int is_gc = flags & NVM_IOTYPE_GC;
+	struct ppa_addr ppa;
+
 
 	assert_spin_locked(&vlun->lock);
 
@@ -356,6 +361,10 @@ static struct nvm_block *gennvm_get_blk_unlocked(struct nvm_dev *dev,
 	blk = list_first_entry(&lun->free_list, struct nvm_block, list);
 	list_move_tail(&blk->list, &lun->used_list);
 	blk->state = NVM_BLK_ST_OPEN;
+
+	ppa = vlun->ppa;
+	ppa.g.blk = blk->id;
+	gennvm_bmi_reserve_blk(dev->mp, ppa, 0);
 
 	lun->vlun.nr_free_blocks--;
 	lun->vlun.nr_open_blocks++;
@@ -379,15 +388,23 @@ static void gennvm_put_blk_unlocked(struct nvm_dev *dev, struct nvm_block *blk)
 {
 	struct nvm_lun *vlun = blk->lun;
 	struct gen_lun *lun = container_of(vlun, struct gen_lun, vlun);
+	struct ppa_addr ppa;
+
+	ppa = vlun->ppa;
+	ppa.g.blk = blk->id;
 
 	assert_spin_locked(&vlun->lock);
 
 	if (blk->state & NVM_BLK_ST_OPEN) {
+		gennvm_bmi_release_blk(dev->mp, ppa);
+
 		list_move_tail(&blk->list, &lun->free_list);
 		lun->vlun.nr_open_blocks--;
 		lun->vlun.nr_free_blocks++;
 		blk->state = NVM_BLK_ST_FREE;
 	} else if (blk->state & NVM_BLK_ST_CLOSED) {
+		gennvm_bmi_release_blk(dev->mp, ppa);
+
 		list_move_tail(&blk->list, &lun->free_list);
 		lun->vlun.nr_closed_blocks--;
 		lun->vlun.nr_free_blocks++;
