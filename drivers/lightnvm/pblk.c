@@ -136,14 +136,15 @@ static inline u64 pblk_nr_free_secs(struct pblk *pblk, struct pblk_block *rblk)
 }
 
 /* requires lun->lock taken */
-static void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk)
+static void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk,
+								int is_bb)
 {
 	struct pblk *pblk = rlun->pblk;
 
 	if (rlun->cur) {
-		spin_lock(&rlun->cur->lock);
-		WARN_ON(!block_is_full(pblk, rlun->cur));
-		spin_unlock(&rlun->cur->lock);
+		spin_lock_irq(&rlun->cur->lock);
+		WARN_ON(!block_is_full(pblk, rlun->cur) && !is_bb);
+		spin_unlock_irq(&rlun->cur->lock);
 	}
 	rlun->cur = rblk;
 }
@@ -306,6 +307,20 @@ fail_alloc_invalid:
 fail_alloc_page:
 	kfree(sync_bitmap);
 	return NULL;
+}
+
+static void pblk_lun_prov(struct work_struct *work)
+{
+	struct pblk_lun *rlun = container_of(work, struct pblk_lun, ws_prov);
+	struct pblk *pblk = rlun->pblk;
+	struct pblk_block *rblk;
+
+	rblk = pblk_get_blk(pblk, rlun, 0);
+	if (!rblk) {
+		pr_err("pblk: cannot allocate new block\n");
+		return;
+	}
+	pblk_set_lun_cur(rlun, rblk, 1);
 }
 
 static struct pblk_lun *get_next_lun(struct pblk *pblk)
@@ -813,27 +828,25 @@ static inline u64 pblk_current_pg(struct pblk *pblk, struct pblk_block *rblk)
 static int pblk_replace_bb(struct pblk *pblk, struct pblk_block *rblk)
 {
 	struct pblk_lun *rlun = rblk->rlun;
-	struct pblk_block *new_rblk;
+	struct pblk_block *cur_blk;
+	unsigned long flags;
 
 	if (!rlun->cur)
 		return 0;
 
-	/* Bad block already retired by previous failed write */
-	spin_lock(&rlun->cur->lock);
-	if (rlun->cur->parent->id != rblk->parent->id) {
-		spin_unlock(&rlun->cur->lock);
+	cur_blk = rlun->cur;
+	spin_lock_irqsave(&cur_blk->lock, flags);
+	if (cur_blk->parent->id != rblk->parent->id) {
+		/* Bad block already retired by previous failed write */
+		spin_unlock_irqrestore(&cur_blk->lock, flags);
 		return 0;
 	}
 
 	rlun->cur = NULL;
-	spin_unlock(&rlun->cur->lock);
+	spin_unlock_irqrestore(&cur_blk->lock, flags);
 
-	new_rblk = pblk_get_blk(pblk, rlun, 0);
-	if (!new_rblk) {
-		pr_err("pblk: cannot allocate new block\n");
-		return 0;
-	}
-	pblk_set_lun_cur(rlun, rblk);
+	INIT_WORK(&rlun->ws_prov, pblk_lun_prov);
+	queue_work(pblk->kw_wq, &rlun->ws_prov);
 
 	return 1;
 }
@@ -953,7 +966,7 @@ try:
 			ret = -ENOSPC;
 			goto out;
 		}
-		pblk_set_lun_cur(rlun, rblk);
+		pblk_set_lun_cur(rlun, rblk, 0);
 	}
 
 out:
@@ -963,14 +976,11 @@ out:
 static int pblk_setup_rec_end_rq(struct pblk *pblk, struct nvm_rq *rqd,
 			struct pblk_ctx *ctx, unsigned int c_entries)
 {
-	struct request_queue *q = pblk->dev->q;
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 	struct nvm_rq *rec_rqd;
-	struct bio *rec_bio;
 	struct pblk_rec_ctx *recovery;
 	struct pblk_ctx *rec_ctx;
 	struct pblk_compl_ctx *rec_c_ctx;
-	unsigned long flags;
 	int nr_entries = c_ctx->nr_valid + c_ctx->nr_padded;
 	int ret = 0;
 
@@ -983,21 +993,18 @@ static int pblk_setup_rec_end_rq(struct pblk *pblk, struct nvm_rq *rqd,
 	rec_ctx = pblk_set_ctx(pblk, rec_rqd);
 	rec_c_ctx = rec_ctx->c_ctx;
 
+	printk(KERN_CRIT "BEFORE: valid:%d,padded:%d\n",
+				c_ctx->nr_valid,
+				c_ctx->nr_padded);
+
 	bitmap_shift_right((long unsigned int *)&rec_rqd->ppa_status,
 			(long unsigned int *)&rqd->ppa_status, 1, c_entries);
-
-	rec_bio = bio_split(rqd->bio, c_entries, GFP_ATOMIC, q->bio_split);
-	if (!rec_bio) {
-		pr_err("pblk: could not allocate recovery bio\n");
-		ret = -ENOMEM;
-		goto free_request;
-	}
 
 	recovery = mempool_alloc(pblk->rec_pool, GFP_ATOMIC);
 	if (!recovery) {
 		pr_err("pblk: could not allocate recovery context\n");
 		ret = -ENOMEM;
-		goto free_bio;
+		goto fail;
 	}
 
 	/* Save the context for the entries that need to be re-written and
@@ -1021,20 +1028,22 @@ static int pblk_setup_rec_end_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		c_ctx->nr_padded = 0;
 	}
 
-	rec_ctx->flags = ctx->flags;
-	rec_rqd->bio = rec_bio;
-	recovery->rqd = rec_rqd;
+	printk(KERN_CRIT "AFTER:c_valid:%d,c_padded:%d,r_valid:%d,r_padded:%d\n",
+				c_ctx->nr_valid,
+				c_ctx->nr_padded,
+				rec_c_ctx->nr_valid,
+				rec_c_ctx->nr_padded);
 
-	spin_lock_irqsave(&recovery->list.lock, flags);
-	list_add_tail(&recovery->list.lock_list, &pblk->recovery_list);
-	spin_unlock_irqrestore(&recovery->list.lock, flags);
+	rec_ctx->flags = ctx->flags;
+	recovery->rqd = rec_rqd;
+	recovery->pblk = pblk;
 
 	INIT_WORK(&recovery->ws_rec, pblk_submit_rec);
 	queue_work(pblk->kw_wq, &recovery->ws_rec);
 
-free_bio:
-	bio_put(rec_bio);
-free_request:
+	return 0;
+
+fail:
 	mempool_free(rec_rqd, pblk->w_rq_pool);
 
 	return ret;
@@ -1180,6 +1189,8 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 
 	c_entries = bit = find_next_bit(comp_bits, max_secs, 0);
 
+	printk(KERN_CRIT "WF: compl:%d\n", c_entries);
+
 	/* Assume that all writes to a block have either succeeded or failed */
 	div_u64_rem(c_entries, pblk->min_write_pgs, &mod);
 	BUG_ON(mod);
@@ -1201,6 +1212,11 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 			pr_err("pblk: could not recover from write failure\n");
 			continue;
 		}
+
+		printk(KERN_CRIT "WF: blk:%lu,ppa:%llu,lba:%lu\n",
+				w_ctx->ppa.rblk->parent->id,
+				w_ctx->ppa.ppa.ppa,
+				w_ctx->lba);
 
 		if (pblk_replace_bb(pblk, w_ctx->ppa.rblk)) {
 			nvm_mark_blk(dev, rqd->ppa_list[bit], NVM_BLK_ST_BAD);
@@ -1893,7 +1909,7 @@ static int pblk_setup_w_multi(struct pblk *pblk, struct nvm_rq *rqd,
 }
 
 static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
-						struct pblk_ctx *ctx)
+			struct pblk_ctx *ctx, unsigned int nr_valid_secs)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
@@ -1901,15 +1917,11 @@ static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
 	unsigned int valid_secs = c_ctx->nr_valid;
 	unsigned int padded_secs = c_ctx->nr_padded;
 	unsigned int nr_secs = valid_secs + padded_secs;
-	unsigned int nr_valid_secs;
 	struct pblk_sec_meta *meta;
-	int max_secs = dev->ops->max_phys_sect;
 	int min = pblk->min_write_pgs;
 	int i;
 	int ret = 0;
 
-	nr_valid_secs =
-		bitmap_weight((long unsigned int *)&rqd->ppa_status, max_secs);
 	ret = __pblk_setup_w_rq(pblk, rqd, ctx, nr_valid_secs);
 	if (ret)
 		goto out;
@@ -1927,6 +1939,16 @@ static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
 	for (i = 0; i < nr_secs; i += min) {
 		if (!test_bit(i, (long unsigned int *)comp_bits)) {
 			//JAVIER: DO CHECK WITH MASK
+			if (c_ctx->nr_valid == 0) {
+				c_ctx->nr_padded -= min;
+			} else if (c_ctx->nr_valid >= min) {
+				c_ctx->nr_valid -= min;
+			} else {
+				c_ctx->nr_padded -= min - c_ctx->nr_valid;
+				c_ctx->nr_valid = 0;
+			}
+
+			BUG_ON((c_ctx->nr_valid < 0) || (c_ctx->nr_padded < 0));
 			continue;
 		}
 
@@ -2104,18 +2126,38 @@ static void pblk_submit_rec(struct work_struct *work)
 	struct pblk_rec_ctx *rec_ctx =
 			container_of(work, struct pblk_rec_ctx, ws_rec);
 	struct pblk *pblk = rec_ctx->pblk;
+	struct nvm_dev *dev = pblk->dev;
 	struct nvm_rq *rqd = rec_ctx->rqd;
-	struct bio *bio = rqd->bio;
+	struct bio *bio;
 	struct pblk_ctx *ctx = pblk_set_ctx(pblk, rqd);
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
+	unsigned int nr_valid_secs;
+	/* unsigned int pgs_read; */
+	int max_secs = dev->ops->max_phys_sect;
 	int err;
 
-	if (pblk_setup_rec_rq(pblk, rqd, ctx)) {
-		pr_err("pblk: could not setup recovery write request\n");
+	return;
+
+	nr_valid_secs =
+		bitmap_weight((long unsigned int *)&rqd->ppa_status, max_secs);
+
+	bio = bio_alloc(GFP_KERNEL, nr_valid_secs);
+	if (!bio) {
+		pr_err("pblk: not able to create recovery bio\n");
+		return;
+	}
+	bio->bi_iter.bi_sector = 0; /* artificial bio */
+	bio->bi_rw = WRITE;
+	rqd->bio = bio;
+
+	//TODO: JAVIER: NEED TO READ FROM BUFFER AGAIN. ONLY FAILED WRITES
+
+	if (pblk_setup_rec_rq(pblk, rqd, ctx, nr_valid_secs)) {
+		pr_err("pblk: could not setup recovery request\n");
 		goto fail;
 	}
 
-	err = nvm_submit_io(pblk->dev, rqd);
+	err = nvm_submit_io(dev, rqd);
 	if (err) {
 		pr_err("pblk: I/O submission failed: %d\n", err);
 		goto fail;
@@ -2126,11 +2168,11 @@ static void pblk_submit_rec(struct work_struct *work)
 #endif
 
 	return;
+
 fail:
 	bio_put(bio);
 	mempool_free(rqd, pblk->w_rq_pool);
 }
-
 
 /*
  * pblk_submit_write -- thread to submit buffered writes to device
@@ -2430,7 +2472,6 @@ static int pblk_core_init(struct pblk *pblk)
 	INIT_LIST_HEAD(&pblk->l2p_locks.lock_list);
 
 	INIT_LIST_HEAD(&pblk->compl_list);
-	INIT_LIST_HEAD(&pblk->recovery_list);
 
 	return 0;
 
@@ -2548,6 +2589,8 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 		INIT_LIST_HEAD(&rlun->closed_list);
 
 		INIT_WORK(&rlun->ws_gc, pblk_lun_gc);
+		INIT_WORK(&rlun->ws_prov, pblk_lun_prov);
+
 		spin_lock_init(&rlun->lock);
 		spin_lock_init(&rlun->lock_lists);
 
@@ -2955,7 +2998,7 @@ static int pblk_luns_configure(struct pblk *pblk)
 		if (!rblk)
 			goto err;
 
-		pblk_set_lun_cur(rlun, rblk);
+		pblk_set_lun_cur(rlun, rblk, 0);
 
 		/* Emergency gc block */
 		rblk = pblk_get_blk(pblk, rlun, 1);

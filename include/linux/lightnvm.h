@@ -418,6 +418,9 @@ static inline struct ppa_addr dev_to_generic_addr(struct nvm_dev *dev,
 	l.g.ch |= (r.ppa >> dev->ppaf.ch_offset) &
 					(((1 << dev->ppaf.ch_len) - 1));
 
+	/* On device side, reserved bit is always 0 */
+	l.g.reserved = 0;
+
 	return l;
 }
 

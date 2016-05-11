@@ -436,7 +436,7 @@ unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct bio *bio,
 		if (entry->w_ctx.bio != NULL) {
 			*sync_point = subm;
 #if CONFIG_NVM_DEBUG
-	atomic_dec(&rb->inflight_sync_point);
+			atomic_dec(&rb->inflight_sync_point);
 #endif
 		}
 
@@ -593,23 +593,29 @@ unsigned long pblk_rb_sync_point_count(struct pblk_rb *rb)
 struct pblk_w_ctx *pblk_rb_sync_scan_entry(struct pblk_rb *rb,
 						struct ppa_addr *ppa)
 {
+	struct pblk *pblk = container_of(rb, struct pblk, rwb);
+	struct nvm_dev *dev = pblk->dev;
 	struct pblk_rb_entry *entry;
 	struct pblk_w_ctx *w_ctx;
-	unsigned long sync_point, subm, count;
+	struct ppa_addr gppa;
+	unsigned long sync, subm, count;
 	unsigned long i;
 
-	sync_point = READ_ONCE(rb->sync_point);
+	sync = READ_ONCE(rb->sync);
 	subm = READ_ONCE(rb->subm);
-	count = pblk_rb_ring_count(sync_point, subm, rb->nr_entries) + 1;
+	count = pblk_rb_ring_count(subm, sync, rb->nr_entries);
 
 	for (i = 0; i < count; i++) {
-		entry = &rb->entries[sync_point];
+		entry = &rb->entries[sync];
 		w_ctx = &entry->w_ctx;
 
-		if (w_ctx->ppa.ppa.ppa == w_ctx->ppa.ppa.ppa)
+		gppa = pblk_ppa_to_gaddr(dev, global_addr(pblk,
+				w_ctx->ppa.rblk, ppa_to_addr(w_ctx->ppa.ppa)));
+
+		if (gppa.ppa == ppa->ppa)
 			return w_ctx;
 
-		sync_point = (sync_point + 1) & (rb->nr_entries - 1);
+		sync = (sync + 1) & (rb->nr_entries - 1);
 	}
 
 	return NULL;

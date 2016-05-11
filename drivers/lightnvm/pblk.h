@@ -117,7 +117,6 @@ struct pblk_w_ctx {
 struct pblk_rec_ctx {
 	struct pblk *pblk;
 	struct nvm_rq *rqd;
-	struct pblk_locked_list list;
 	struct work_struct ws_rec;
 };
 
@@ -225,6 +224,7 @@ struct pblk_lun {
 					 */
 
 	struct work_struct ws_gc;
+	struct work_struct ws_prov;
 
 	spinlock_t lock_lists;
 	spinlock_t lock;
@@ -288,7 +288,6 @@ struct pblk {
 	struct pblk_locked_list l2p_locks;
 
 	struct list_head compl_list;
-	struct list_head recovery_list;
 
 	mempool_t *page_pool;
 	mempool_t *gcb_pool;
