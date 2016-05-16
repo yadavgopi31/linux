@@ -214,7 +214,7 @@ static void __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned long *l2p_upd,
 	struct pblk *pblk = container_of(rb, struct pblk, rwb);
 	struct nvm_dev *dev = pblk->dev;
 	struct pblk_rb_entry *entry;
-	struct pblk_l2p_upd_ctx *upt_ctx;
+	struct pblk_l2p_upd_ctx *upd_ctx;
 	struct pblk_w_ctx *w_ctx;
 	struct pblk_block *rblk;
 	struct ppa_addr ppa;
@@ -228,11 +228,11 @@ static void __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned long *l2p_upd,
 		entry = &rb->entries[l2p_upd_l];
 
 		w_ctx = &entry->w_ctx;
-		upt_ctx = &w_ctx->upt_ctx;
+		upd_ctx = &w_ctx->upd_ctx;
 		rblk = w_ctx->ppa.rblk;
 
 try:
-		if (pblk_lock_laddr(pblk, w_ctx->lba, 1, upt_ctx)) {
+		if (pblk_lock_laddr(pblk, w_ctx->lba, 1, upd_ctx)) {
 			schedule();
 			goto try;
 		}
@@ -241,7 +241,7 @@ try:
 		ppa = pblk_ppa_to_gaddr(dev, global_addr(pblk, rblk, paddr));
 		pblk_update_map(pblk, w_ctx->lba, rblk, ppa);
 
-		pblk_unlock_laddr(pblk, upt_ctx, PBLK_UNLOCK_ADDR_NORM);
+		pblk_unlock_laddr(pblk, upd_ctx, PBLK_UNLOCK_ADDR_NORM);
 
 		l2p_upd_l = (l2p_upd_l + 1) & (rb->nr_entries - 1);
 	}
@@ -370,6 +370,48 @@ void pblk_rb_write_rollback(struct pblk_rb *rb)
 }
 
 /**
+ * The caller of this function muxt ensure that the backpointer will not
+ * overwrite the entries passed on the list.
+ */
+unsigned int pblk_rb_read_to_bio_list(struct pblk_rb *rb, struct bio *bio,
+					struct pblk_ctx *ctx,
+					struct list_head *list,
+					unsigned int max)
+{
+	struct pblk *pblk = container_of(rb, struct pblk, rwb);
+	struct request_queue *q = pblk->dev->q;
+	struct pblk_rb_entry *entry, *tentry;
+	struct page *page;
+	unsigned int read = 0;
+	int ret;
+
+	list_for_each_entry_safe(entry, tentry, list, index) {
+		if (read > max) {
+			pr_err("pblk: too many entries on list\n");
+			goto out;
+		}
+
+		page = vmalloc_to_page(entry->data);
+		if (!page) {
+			pr_err("pblk: could not allocate write bio page\n");
+			goto out;
+		}
+
+		ret = bio_add_pc_page(q, bio, page, rb->seg_size, 0);
+		if (ret != rb->seg_size) {
+			pr_err("pblk: could not add page to write bio\n");
+			goto out;
+		}
+
+		list_del(&entry->index);
+		read++;
+	}
+
+out:
+	return read;
+}
+
+/**
  * pblk_rb_read_to_bio - read from write buffer to bio
  * @rb: ring buffer
  * @bio: write bio
@@ -429,7 +471,7 @@ unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct bio *bio,
 
 		ret = bio_add_pc_page(q, bio, page, rb->seg_size, 0);
 		if (ret != rb->seg_size) {
-			pr_err("pblk: could not ad page to write bio\n");
+			pr_err("pblk: could not add page to write bio\n");
 			goto out;
 		}
 
@@ -590,7 +632,7 @@ unsigned long pblk_rb_sync_point_count(struct pblk_rb *rb)
  * reach the entry while it is using the metadata associated with it. With this
  * assumption in mind, there is no need to take the sync lock.
  */
-struct pblk_w_ctx *pblk_rb_sync_scan_entry(struct pblk_rb *rb,
+struct pblk_rb_entry *pblk_rb_sync_scan_entry(struct pblk_rb *rb,
 						struct ppa_addr *ppa)
 {
 	struct pblk *pblk = container_of(rb, struct pblk, rwb);
@@ -613,7 +655,7 @@ struct pblk_w_ctx *pblk_rb_sync_scan_entry(struct pblk_rb *rb,
 				w_ctx->ppa.rblk, ppa_to_addr(w_ctx->ppa.ppa)));
 
 		if (gppa.ppa == ppa->ppa)
-			return w_ctx;
+			return entry;
 
 		sync = (sync + 1) & (rb->nr_entries - 1);
 	}

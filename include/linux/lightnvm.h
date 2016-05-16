@@ -14,6 +14,7 @@ enum {
 	NVM_IOTYPE_SYNC = 2,
 	NVM_IOTYPE_CLOSE_BLK = 4,
 	NVM_IOTYPE_PAD = 8,
+	NVM_IOTYPE_REC = 16,
 };
 
 #define NVM_BLK_BITS (16)

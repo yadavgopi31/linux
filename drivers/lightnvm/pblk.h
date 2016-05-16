@@ -98,8 +98,16 @@ struct pblk_ctx {
 
 /* Read context */
 struct pblk_r_ctx {
-	struct pblk_l2p_upd_ctx upt_ctx;/* Update context for l2p table */
+	struct pblk_l2p_upd_ctx upd_ctx;/* Update context for l2p table */
 	int flags;			/* Read context flags */
+};
+
+/* Recovery context */
+struct pblk_rec_ctx {
+	struct pblk *pblk;
+	struct nvm_rq *rqd;
+	struct list_head failed;
+	struct work_struct ws_rec;
 };
 
 /* Write context */
@@ -107,22 +115,16 @@ struct pblk_w_ctx {
 	struct bio *bio;		/* Original bio - used for completing in
 					 * REQ_FUA, REQ_FLUSH case
 					 */
-	struct pblk_l2p_upd_ctx upt_ctx;/* Update context for l2p table */
+	struct pblk_l2p_upd_ctx upd_ctx;/* Update context for l2p table */
 	sector_t lba;			/* Logic addr. associated with entry */
 	struct pblk_addr ppa;		/* Physic addr. associated with entry */
 	int flags;			/* Write context flags */
 };
 
-/* Recovery context */
-struct pblk_rec_ctx {
-	struct pblk *pblk;
-	struct nvm_rq *rqd;
-	struct work_struct ws_rec;
-};
-
 struct pblk_rb_entry {
 	void *data;			/* Pointer to data on this entry */
 	struct pblk_w_ctx w_ctx;	/* Context for this entry */
+	struct list_head index;		/* List head to enable indexes */
 };
 
 #define RB_EMPTY_ENTRY (~0ULL)
@@ -183,6 +185,7 @@ struct pblk_blk_rec_lpg {
 	u32 status;
 	u32 rlpg_len;
 	u32 req_len;
+	u32 nr_lbas;
 };
 
 struct pblk_block {
@@ -328,6 +331,10 @@ unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct bio *bio,
 					struct pblk_ctx *ctx,
 					unsigned int nr_entries,
 					unsigned long *sp);
+unsigned int pblk_rb_read_to_bio_list(struct pblk_rb *rb, struct bio *bio,
+					struct pblk_ctx *ctx,
+					struct list_head *list,
+					unsigned int max);
 void pblk_rb_read_commit(struct pblk_rb *rb, unsigned int entries);
 void pblk_rb_read_rollback(struct pblk_rb *rb);
 unsigned int pblk_rb_copy_to_bio(struct pblk_rb *rb, struct bio *bio,
@@ -339,7 +346,7 @@ void pblk_rb_sync_end(struct pblk_rb *rb, unsigned long flags);
 int pblk_rb_sync_point_set(struct pblk_rb *rb, struct bio *bio);
 unsigned long pblk_rb_sync_point_count(struct pblk_rb *rb);
 void pblk_rb_sync_point_reset(struct pblk_rb *rb, unsigned long sp);
-struct pblk_w_ctx *pblk_rb_sync_scan_entry(struct pblk_rb *rb,
+struct pblk_rb_entry *pblk_rb_sync_scan_entry(struct pblk_rb *rb,
 						struct ppa_addr *ppa);
 unsigned long pblk_rb_space(struct pblk_rb *rb);
 unsigned long pblk_rb_count(struct pblk_rb *rb);
