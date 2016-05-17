@@ -67,6 +67,12 @@ struct pblk_locked_list {
 	spinlock_t lock;
 };
 
+/* Buffer allocated after counter */
+struct pblk_kref_buf {
+	struct kref ref;
+	void *data;
+};
+
 struct pblk_l2p_upd_ctx {
 	struct list_head list;
 	sector_t l_start;
@@ -115,6 +121,7 @@ struct pblk_w_ctx {
 	struct bio *bio;		/* Original bio - used for completing in
 					 * REQ_FUA, REQ_FLUSH case
 					 */
+	void *priv;			/* Private pointer */
 	struct pblk_l2p_upd_ctx upd_ctx;/* Update context for l2p table */
 	sector_t lba;			/* Logic addr. associated with entry */
 	struct pblk_addr ppa;		/* Physic addr. associated with entry */
@@ -186,6 +193,7 @@ struct pblk_blk_rec_lpg {
 	u32 rlpg_len;
 	u32 req_len;
 	u32 nr_lbas;
+	u32 nr_padded;
 };
 
 struct pblk_block {
@@ -379,6 +387,19 @@ static inline void pblk_memcpy_addr(struct pblk_addr *to,
 	to->rblk = from->rblk;
 }
 
+static inline void pblk_free_ref_mem(struct kref *ref)
+{
+	struct pblk_kref_buf *ref_buf;
+	void *data;
+
+	// printk(KERN_CRIT "FREE DATA!!\n");
+
+	ref_buf = container_of(ref, struct pblk_kref_buf, ref);
+	data = ref_buf->data;
+
+	kfree(data);
+}
+
 /* Calculate the page offset of within a block from a generic address */
 static inline u64 pblk_gaddr_to_pg_offset(struct nvm_dev *dev,
 							struct ppa_addr p)
@@ -547,6 +568,7 @@ static int __pblk_lock_laddr(struct pblk *pblk, sector_t laddr,
 
 	list_add_tail(&r->list, &pblk->l2p_locks.lock_list);
 	spin_unlock_irq(&pblk->l2p_locks.lock);
+
 	return 0;
 }
 
@@ -594,6 +616,19 @@ static inline void pblk_unlock_rq(struct pblk *pblk, struct bio *bio,
 	BUG_ON((l2p_ctx->l_start + nr_secs) > pblk->nr_secs);
 
 	pblk_unlock_laddr(pblk, l2p_ctx, int_flags);
+}
+
+static inline int pblk_lock_overlap(struct pblk *pblk, u64 lba, u64 *lba_list,
+									int max)
+{
+	int i;
+
+	for (i = 0; i < max; i++) {
+		if (lba_list[i] == lba)
+			return 1;
+	}
+
+	return 0;
 }
 
 #endif /* PBLK_H_ */

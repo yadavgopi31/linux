@@ -122,6 +122,7 @@ static void memcpy_wctx(struct pblk_w_ctx *to, struct pblk_w_ctx *from)
 	to->lba = from->lba;
 	to->flags = from->flags;
 	to->ppa = from->ppa;
+	to->priv = from->priv;
 }
 
 #define pblk_rb_ring_count(head, tail, size) CIRC_CNT(head, tail, size)
@@ -370,7 +371,7 @@ void pblk_rb_write_rollback(struct pblk_rb *rb)
 }
 
 /**
- * The caller of this function muxt ensure that the backpointer will not
+ * The caller of this function must ensure that the backpointer will not
  * overwrite the entries passed on the list.
  */
 unsigned int pblk_rb_read_to_bio_list(struct pblk_rb *rb, struct bio *bio,
@@ -543,12 +544,30 @@ unsigned long pblk_rb_sync_init(struct pblk_rb *rb, unsigned long *flags)
 
 unsigned long pblk_rb_sync_advance(struct pblk_rb *rb, unsigned int nr_entries)
 {
+	struct pblk_rb_entry *entry;
+	struct pblk_w_ctx *w_ctx;
 	unsigned long sync;
+	unsigned long i;
 
 	lockdep_assert_held(&rb->sy_lock);
 	sync = READ_ONCE(rb->sync);
 
-	sync = (sync + nr_entries) & (rb->nr_entries - 1);
+	for (i = 0; i < nr_entries; i++) {
+		entry = &rb->entries[sync];
+		w_ctx = &entry->w_ctx;
+
+		if (w_ctx->flags == NVM_IOTYPE_REF) {
+			struct pblk_kref_buf *ref_buf;
+
+			printk(KERN_CRIT "PUT REF\n");
+			BUG_ON(!w_ctx->priv);
+			ref_buf = w_ctx->priv;
+			kref_put(&ref_buf->ref, pblk_free_ref_mem);
+		}
+
+		sync = (sync + 1) & (rb->nr_entries - 1);
+	}
+
 	smp_store_release(&rb->sync, sync);
 
 	return sync;
