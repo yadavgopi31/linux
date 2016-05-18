@@ -216,6 +216,8 @@ struct pblk_block {
 	/* number of pages that are invalid, wrt host page size */
 	unsigned int nr_invalid_pages;
 
+	struct kref ref;
+
 	spinlock_t lock;
 };
 
@@ -235,7 +237,7 @@ struct pblk_lun {
 					 */
 
 	struct work_struct ws_gc;
-	struct work_struct ws_prov;
+	// struct work_struct ws_prov;
 
 	spinlock_t lock_lists;
 	spinlock_t lock;
@@ -392,7 +394,7 @@ static inline void pblk_free_ref_mem(struct kref *ref)
 	struct pblk_kref_buf *ref_buf;
 	void *data;
 
-	// printk(KERN_CRIT "FREE DATA!!\n");
+	printk(KERN_CRIT "FREE DATA!!\n");
 
 	ref_buf = container_of(ref, struct pblk_kref_buf, ref);
 	data = ref_buf->data;
@@ -595,6 +597,10 @@ static inline int pblk_lock_rq(struct pblk *pblk, struct bio *bio,
 static inline void pblk_unlock_laddr(struct pblk *pblk,
 				struct pblk_l2p_upd_ctx *r, int int_flags)
 {
+	BUG_ON(!r);
+	BUG_ON(!r->list.prev);
+	BUG_ON(!r->list.next);
+
 	if (int_flags == PBLK_UNLOCK_ADDR_INT) {
 		unsigned long flags;
 

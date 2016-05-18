@@ -209,6 +209,22 @@ void pblk_rb_read_rollback(struct pblk_rb *rb)
 	spin_unlock(&rb->s_lock);
 }
 
+static void pblk_rb_requeue_entry(struct pblk_rb *rb,
+						struct pblk_rb_entry *entry)
+{
+	struct pblk *pblk = container_of(rb, struct pblk, rwb);
+	struct ppa_addr ppa;
+	unsigned long mem;
+
+	/* Serialized in pblk_rb_write_init */
+	mem = READ_ONCE(rb->mem);
+
+	/* Move entry to the head of the write buffer and update l2p */
+	while(pblk_rb_write_entry(rb, entry->data, entry->w_ctx, mem));
+	ppa = pblk_cacheline_to_ppa(mem);
+	pblk_update_map(pblk, entry->w_ctx.lba, NULL, ppa);
+}
+
 static void __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned long *l2p_upd,
 							unsigned long to_update)
 {
@@ -232,16 +248,29 @@ static void __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned long *l2p_upd,
 		upd_ctx = &w_ctx->upd_ctx;
 		rblk = w_ctx->ppa.rblk;
 
-try:
-		if (pblk_lock_laddr(pblk, w_ctx->lba, 1, upd_ctx)) {
-			schedule();
-			goto try;
+		/* Cannot sleep. If the address is locked, it is not long */
+		while (pblk_lock_laddr(pblk, w_ctx->lba, 1, upd_ctx));
+
+		/* Grown bad block. For now, we requeue the entry to the write
+		 * buffer and make it take the normal path to get a new ppa
+		 * mapping.
+		 *
+		 * TODO: Make a recovery path that prioritizes these entries in
+		 * order to "better comply" with the expectations of user space
+		 * applications (e.g., returned FLUSH | FUA).
+		 *
+		 * JAVIER!!!: Move this to its own function
+		 **/
+		if (unlikely(rblk->parent->state == NVM_BLK_ST_BAD)) {
+			pblk_rb_requeue_entry(rb, entry);
+			goto next;
 		}
 
 		paddr = ppa_to_addr(w_ctx->ppa.ppa);
 		ppa = pblk_ppa_to_gaddr(dev, global_addr(pblk, rblk, paddr));
 		pblk_update_map(pblk, w_ctx->lba, rblk, ppa);
 
+next:
 		pblk_unlock_laddr(pblk, upd_ctx, PBLK_UNLOCK_ADDR_NORM);
 
 		l2p_upd_l = (l2p_upd_l + 1) & (rb->nr_entries - 1);
@@ -514,8 +543,10 @@ unsigned int pblk_rb_copy_to_bio(struct pblk_rb *rb, struct bio *bio,
 	struct page *page;
 	void *kaddr;
 
-	if (pos >= rb->nr_entries)
+	if (pos >= rb->nr_entries) {
+		pr_err("pblk: out-of-bound access to write buffer\n");
 		return 0;
+	}
 
 	entry = &rb->entries[pos];
 
@@ -559,7 +590,7 @@ unsigned long pblk_rb_sync_advance(struct pblk_rb *rb, unsigned int nr_entries)
 		if (w_ctx->flags == NVM_IOTYPE_REF) {
 			struct pblk_kref_buf *ref_buf;
 
-			printk(KERN_CRIT "PUT REF\n");
+			/* printk(KERN_CRIT "PUT REF\n"); */
 			BUG_ON(!w_ctx->priv);
 			ref_buf = w_ctx->priv;
 			kref_put(&ref_buf->ref, pblk_free_ref_mem);
