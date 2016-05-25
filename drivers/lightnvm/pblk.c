@@ -1176,7 +1176,6 @@ static int pblk_try_read_from_cache(struct pblk *pblk, struct bio *bio,
 	 * points to a cacheline, the lba lock guarantees that the entry is not
 	 * going to be updated by new writes
 	 */
-	BUG_ON(addr->ppa.ppa == ADDR_EMPTY);//JAVIER: THIS WILL GO
 	if (!nvm_addr_in_cache(addr->ppa))
 		return 0;
 
@@ -1882,7 +1881,7 @@ static void pblk_submit_write(struct work_struct *work)
 
 	if (secs_to_flush <= secs_to_sync)
 		pblk_rb_sync_point_reset(&pblk->rwb, sync_point);
-	// JAVIER: USE sync_point instead of pgs_read and re-calculating
+
 	pblk_rb_read_commit(&pblk->rwb, pgs_read);
 
 	bio->bi_iter.bi_sector = 0; /* artificial bio */
