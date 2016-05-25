@@ -460,14 +460,13 @@ static inline void pblk_free_ref_mem(struct kref *ref)
 	struct pblk_kref_buf *ref_buf;
 	void *data;
 
-	//JAVIER!!!
-	return;
 	// printk(KERN_CRIT "FREE DATA!!\n");
 
 	ref_buf = container_of(ref, struct pblk_kref_buf, ref);
 	data = ref_buf->data;
 
 	kfree(data);
+	kfree(ref_buf);
 }
 
 /* Calculate the page offset of within a block from a generic address */

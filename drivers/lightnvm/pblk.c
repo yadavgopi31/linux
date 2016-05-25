@@ -471,7 +471,7 @@ static void pblk_block_gc(struct work_struct *work)
 	/* pblk_put_blk(pblk, rblk); */
 	return;
 
-put_back:
+/* put_back: */
 	spin_lock(&rlun->lock);
 	list_add_tail(&rblk->prio, &rlun->prio_list);
 	spin_unlock(&rlun->lock);

@@ -45,6 +45,7 @@ static int pblk_write_recov_to_cache(struct pblk *pblk, struct bio *bio,
 	struct ppa_addr ppa;
 	void *data;
 	struct bio *b = NULL;
+	struct pblk_kref_buf *ref_buf;
 	unsigned long pos;
 	unsigned int i, valid_secs = 0;
 
@@ -77,17 +78,14 @@ static int pblk_write_recov_to_cache(struct pblk *pblk, struct bio *bio,
 		w_ctx.flags = flags;
 		ppa_set_empty(&w_ctx.ppa.ppa);
 
-		if (flags == PBLK_IOTYPE_REF) {
-			struct pblk_kref_buf *ref_buf;
+#ifdef CONFIG_NVM_DEBUG
+		BUG_ON(!(flags & PBLK_IOTYPE_REF));
+#endif
+		ref_buf = bio->bi_private;
+		w_ctx.priv = ref_buf;
+		kref_get(&ref_buf->ref);
 
-			//JAVIER: TEST
-			/* printk(KERN_CRIT "GET REF\n"); */
-
-			ref_buf = w_ctx.priv = bio->bi_private;
-			kref_get(&ref_buf->ref);
-		} else {
-			w_ctx.priv = NULL;
-		}
+		/* printk(KERN_CRIT "GET REF:lba:%llu\n", lba_list[i]); */
 
 		data = bio_data(bio);
 		if (pblk_rb_write_entry(&pblk->rwb, data, w_ctx,
@@ -353,6 +351,9 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 	kref_init(&ref_buf->ref);
 	ref_buf->data = data;
 
+	printk(KERN_CRIT "RECOV:blk:%lu,off:%d\n",
+				rblk->parent->id, off);
+
 	read_left = nr_entries;
 	do {
 		secs_to_rec = pblk_calc_secs_to_sync(pblk, read_left, 0);
@@ -412,9 +413,6 @@ lock_retry:
 		if (ignored == secs_to_rec)
 			goto next;
 
-		printk(KERN_CRIT "RECOV:blk:%lu,n:%d,off:%d\n",
-				rblk->parent->id, secs_to_rec, off);
-
 		/* Read from grown bad block */
 		bio_len = secs_to_rec * dev->sec_size;
 		bio = bio_map_kern(q, data, bio_len, GFP_KERNEL);
@@ -453,8 +451,10 @@ lock_retry:
 	atomic_sub(secs_to_rec, &pblk->inflight_reads);
 #endif
 
-		/* Write to buffer */
+		bio_put(bio);
 		bio_reset(bio);
+
+		/* Write to buffer */
 		bio = bio_map_kern(q, data, bio_len, GFP_KERNEL);
 		if (!bio) {
 			pr_err("pblk: could not allocate recovery bio\n");
@@ -488,6 +488,7 @@ next:
 		off += secs_to_rec;
 	} while (read_left > 0);
 
+	kref_put(&ref_buf->ref, pblk_free_ref_mem);
 	kfree(upd_ctx);
 
 	spin_lock(&rblk->rlun->lock_lists);
@@ -502,6 +503,8 @@ next:
 	if (pblk_rb_count(&pblk->rwb) >= pblk->min_write_pgs)
 		queue_work(pblk->kw_wq, &pblk->ws_writer);
 
+
+	mempool_free(gcb, pblk->gcb_pool);
 	return;
 
 fail_free_rqd:
@@ -521,6 +524,8 @@ fail_free_ctx:
 	kfree(upd_ctx);
 out:
 	spin_unlock(&rblk->lock);
+
+	mempool_free(gcb, pblk->gcb_pool);
 }
 
 static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,

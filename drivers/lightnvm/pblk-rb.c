@@ -653,11 +653,10 @@ unsigned long pblk_rb_sync_advance(struct pblk_rb *rb, unsigned int nr_entries)
 		entry = &rb->entries[sync];
 		w_ctx = &entry->w_ctx;
 
-		if (w_ctx->flags == PBLK_IOTYPE_REF) {
+		if (unlikely(w_ctx->flags == PBLK_IOTYPE_REF)) {
 			struct pblk_kref_buf *ref_buf;
 
-			//JAVIER: TEST
-			/* printk(KERN_CRIT "PUT REF\n"); */
+			/* printk(KERN_CRIT "PUT REF:lb:%lu\n", w_ctx->lba); */
 			BUG_ON(!w_ctx->priv);
 			ref_buf = w_ctx->priv;
 			kref_put(&ref_buf->ref, pblk_free_ref_mem);
