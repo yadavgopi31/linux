@@ -121,10 +121,6 @@ static void memcpy_fromrb(struct pblk_rb *rb, void *buf, void *data,
 /* Copy write context metadata to buffer entry */
 static void memcpy_wctx(struct pblk_w_ctx *to, struct pblk_w_ctx *from)
 {
-	//JAVIER: THIS WILL GO
-	BUG_ON(!to);
-	BUG_ON(!from);
-
 	to->bio = from->bio;
 	to->lba = from->lba;
 	to->flags = from->flags;
@@ -610,7 +606,6 @@ unsigned int pblk_rb_copy_to_bio(struct pblk_rb *rb, struct bio *bio,
 
 	if (pos >= rb->nr_entries) {
 		pr_err("pblk: out-of-bound access to write buffer:%llu\n", pos);
-		BUG_ON(1); //JAVIER
 		return 0;
 	}
 

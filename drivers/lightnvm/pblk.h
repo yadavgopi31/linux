@@ -560,12 +560,10 @@ static void pblk_page_invalidate(struct pblk *pblk, struct pblk_addr *a)
 	struct pblk_block *rblk = a->rblk;
 	u64 block_ppa;
 
+#ifdef CONFIG_NVM_DEBUG
 	BUG_ON(nvm_addr_in_cache(a->ppa));
-
-	if (a->ppa.ppa == ADDR_EMPTY) {
-		BUG_ON(a->rblk);
-		return;
-	}
+	BUG_ON(ppa_empty(a->ppa));
+#endif
 
 	block_ppa = pblk_gaddr_to_pg_offset(pblk->dev, a->ppa);
 	WARN_ON(test_and_set_bit(block_ppa, rblk->invalid_pages));
@@ -680,9 +678,11 @@ static inline int pblk_lock_rq(struct pblk *pblk, struct bio *bio,
 static inline void pblk_unlock_laddr(struct pblk *pblk,
 				struct pblk_l2p_upd_ctx *r, int int_flags)
 {
+#ifdef CONFIG_NVM_DEBUG
 	BUG_ON(!r);
 	BUG_ON(!r->list.prev);
 	BUG_ON(!r->list.next);
+#endif
 
 	if (int_flags == PBLK_UNLOCK_ADDR_INT) {
 		unsigned long flags;

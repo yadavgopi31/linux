@@ -971,7 +971,6 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 static void pblk_end_io_write(struct pblk *pblk, struct nvm_rq *rqd)
 {
 	struct pblk_ctx *ctx;
-	struct pblk_compl_ctx *c_ctx;
 
 	if (rqd->error == NVM_RSP_ERR_FAILWRITE)
 		return pblk_end_w_fail(pblk, rqd);
@@ -981,9 +980,13 @@ static void pblk_end_io_write(struct pblk *pblk, struct nvm_rq *rqd)
 	if (ctx->flags & PBLK_IOTYPE_CLOSE_BLK)
 		return pblk_end_close_blk_bio(pblk, rqd, 1);
 
-	c_ctx = ctx->c_ctx;
-	BUG_ON(!(ctx->flags & PBLK_IOTYPE_REC) &&
-			rqd->nr_ppas != (c_ctx->nr_valid + c_ctx->nr_padded));
+#ifdef CONFIG_NVM_DEBUG
+	if (!(ctx->flags & PBLK_IOTYPE_REC)) {
+		struct pblk_compl_ctx *c_ctx;
+		c_ctx = ctx->c_ctx;
+		BUG_ON(rqd->nr_ppas != (c_ctx->nr_valid + c_ctx->nr_padded));
+	}
+#endif
 
 	if (ctx->flags & PBLK_IOTYPE_PAD)
 		return pblk_end_w_pad(pblk, rqd, ctx);
