@@ -263,6 +263,24 @@ static inline void *nvm_rq_to_pdu(struct nvm_rq *rqdata)
 	return rqdata + 1;
 }
 
+static inline int nvm_addr_in_cache(struct ppa_addr gp)
+{
+#ifdef CONFIG_NVM_DEBUG
+	BUG_ON(gp.ppa == ADDR_EMPTY);
+#endif
+	if (gp.c.is_cached)
+		return 1;
+	return 0;
+}
+
+static inline u64 nvm_addr_to_cacheline(struct ppa_addr gp)
+{
+#ifdef CONFIG_NVM_DEBUG
+	BUG_ON(gp.ppa == ADDR_EMPTY);
+#endif
+	return gp.c.line;
+}
+
 struct nvm_block;
 
 struct nvm_lun {
