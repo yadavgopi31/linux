@@ -46,7 +46,7 @@ static int pblk_write_recov_to_cache(struct pblk *pblk, struct bio *bio,
 	void *data;
 	struct bio *b = NULL;
 	unsigned long pos;
-	unsigned int i, j;
+	unsigned int i, valid_secs = 0;
 
 	BUG_ON(!bio_has_data(bio));
 
@@ -68,7 +68,7 @@ static int pblk_write_recov_to_cache(struct pblk *pblk, struct bio *bio,
 		*ret_val = NVM_IO_DONE;
 	}
 
-	for (i = 0, j = 0; i < nr_entries; i++) {
+	for (i = 0, valid_secs = 0; i < nr_entries; i++) {
 		if (lba_list[i] == ADDR_EMPTY)
 			continue;
 
@@ -90,27 +90,33 @@ static int pblk_write_recov_to_cache(struct pblk *pblk, struct bio *bio,
 		}
 
 		data = bio_data(bio);
-		if (pblk_rb_write_entry(&pblk->rwb, data, w_ctx, pos + j))
+		if (pblk_rb_write_entry(&pblk->rwb, data, w_ctx,
+							pos + valid_secs))
 			goto rollback;
 
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
-		j++;
+		valid_secs++;
 	}
 
 	/* Update mapping table with the write buffer cachelines. Do it after
 	 * the data is written to the buffer to enable atomic rollback
 	 */
-	for (i = 0, j = 0; i < nr_entries; i++) {
+	for (i = 0, valid_secs = 0; i < nr_entries; i++) {
 		if (lba_list[i] == ADDR_EMPTY)
 			continue;
 
 		ppa = pblk_cacheline_to_ppa(
-					pblk_rb_wrap_pos(&pblk->rwb, pos + j));
+				pblk_rb_wrap_pos(&pblk->rwb, pos + valid_secs));
 		pblk_update_map(pblk, lba_list[i], NULL, ppa);
-		j++;
+		valid_secs++;
 	}
 
-	pblk_rb_write_commit(&pblk->rwb, nr_entries);
+#ifdef CONFIG_NVM_DEBUG
+	atomic_add(valid_secs, &pblk->inflight_writes);
+	atomic_add(valid_secs, &pblk->recov_gc_writes);
+#endif
+
+	pblk_rb_write_commit(&pblk->rwb, valid_secs);
 	return 1;
 
 rollback:
@@ -120,8 +126,8 @@ rollback:
 
 static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 			struct nvm_rq *rqd, u64 *lba_list,
-			unsigned int nr_secs, unsigned long flags,
-			unsigned long *read_bitmap)
+			unsigned int nr_secs, unsigned int *valid_secs,
+			unsigned long flags, unsigned long *read_bitmap)
 {
 	/* int is_gc = *flags & PBLK_IOTYPE_GC; */
 	/* int locked = 0; */
@@ -146,6 +152,8 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 		}
 
 		BUG_ON(!(lba >= 0 && lba < pblk->nr_secs));
+
+		(*valid_secs)++;
 
 		/* Try to read from write buffer. Those addresses that cannot be
 		 * read from the write buffer are sequentially added to the ppa
@@ -198,6 +206,7 @@ static int pblk_submit_recov_read(struct pblk *pblk, struct bio *bio,
 {
 	struct pblk_r_ctx *r_ctx = nvm_rq_to_pdu(rqd);
 	unsigned long read_bitmap; /* Max 64 ppas per request */
+	unsigned int valid_secs = 0;
 	int ret;
 
 	bitmap_zero(&read_bitmap, nr_secs);
@@ -222,7 +231,8 @@ static int pblk_submit_recov_read(struct pblk *pblk, struct bio *bio,
 		}
 
 		ret = pblk_read_ppalist_rq_list(pblk, bio, rqd, lba_list,
-						nr_secs, flags, &read_bitmap);
+						nr_secs, &valid_secs, flags,
+						&read_bitmap);
 		if (ret)
 			goto fail_ppa_free;
 	} else {
@@ -236,7 +246,7 @@ static int pblk_submit_recov_read(struct pblk *pblk, struct bio *bio,
 	rqd->opcode = NVM_OP_PREAD;
 	rqd->bio = bio;
 	rqd->ins = &pblk->instance;
-	rqd->nr_ppas = nr_secs;
+	rqd->nr_ppas = valid_secs;
 	r_ctx->flags = flags;
 
 	if (bitmap_full(&read_bitmap, nr_secs)) {
@@ -402,6 +412,9 @@ lock_retry:
 		if (ignored == secs_to_rec)
 			goto next;
 
+		printk(KERN_CRIT "RECOV:blk:%lu,n:%d,off:%d\n",
+				rblk->parent->id, secs_to_rec, off);
+
 		/* Read from grown bad block */
 		bio_len = secs_to_rec * dev->sec_size;
 		bio = bio_map_kern(q, data, bio_len, GFP_KERNEL);
@@ -484,6 +497,10 @@ next:
 	/*
 	 * TODO: Clean bb_list when doing GC
 	 */
+
+	/* Use count as a heuristic for setting up a job in workqueue */
+	if (pblk_rb_count(&pblk->rwb) >= pblk->min_write_pgs)
+		queue_work(pblk->kw_wq, &pblk->ws_writer);
 
 	return;
 
@@ -584,7 +601,6 @@ static void pblk_submit_rec(struct work_struct *work)
 	struct nvm_rq *rqd = recovery->rqd;
 	struct bio *bio;
 	struct pblk_ctx *ctx = pblk_set_ctx(pblk, rqd);
-	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 	unsigned int nr_rec_secs;
 	unsigned int pgs_read;
 	int max_secs = dev->ops->max_phys_sect;
@@ -615,7 +631,7 @@ static void pblk_submit_rec(struct work_struct *work)
 	}
 
 #ifdef CONFIG_NVM_DEBUG
-	atomic_add(c_ctx->nr_valid + c_ctx->nr_padded, &pblk->recov_writes);
+	atomic_add(nr_rec_secs, &pblk->recov_writes);
 #endif
 
 	err = nvm_submit_io(dev, rqd);
@@ -677,8 +693,6 @@ int pblk_setup_rec_end_rq(struct pblk *pblk, struct pblk_ctx *ctx,
 
 	/* Save the context for the entries that need to be re-written and
 	 * update current context with the completed entries.
-	 *
-	 * JAVIER:: This might not be needed
 	 */
 	rec_c_ctx->sentry = c_ctx->sentry + c_entries;
 	if (c_entries >= c_ctx->nr_valid) {

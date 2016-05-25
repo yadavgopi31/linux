@@ -234,6 +234,11 @@ static void pblk_rb_requeue_entry(struct pblk_rb *rb,
 	ppa = pblk_cacheline_to_ppa(mem);
 	pblk_update_map(pblk, entry->w_ctx.lba, NULL, ppa);
 	smp_store_release(&rb->mem, (mem + 1) & (rb->nr_entries - 1));
+
+#ifdef CONFIG_NVM_DEBUG
+	atomic_inc(&pblk->inflight_writes);
+	atomic_inc(&pblk->requeued_writes);
+#endif
 }
 
 static void pblk_rb_update_map(struct pblk *pblk, struct pblk_w_ctx *w_ctx)
@@ -459,7 +464,7 @@ void pblk_rb_write_rollback(struct pblk_rb *rb)
 	spin_unlock(&rb->w_lock);
 }
 
-/**
+/*
  * The caller of this function must ensure that the backpointer will not
  * overwrite the entries passed on the list.
  */

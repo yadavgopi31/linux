@@ -780,23 +780,6 @@ static inline u64 pblk_current_pg(struct pblk *pblk, struct pblk_block *rblk)
 }
 #endif
 
-static int pblk_cur_is_bb(struct pblk_block *rblk)
-{
-	struct pblk_lun *rlun = rblk->rlun;
-	struct pblk_block *cur_blk;
-
-	if (!rlun->cur)
-		return 0;
-
-	cur_blk = rlun->cur;
-	if (cur_blk->parent->id != rblk->parent->id) {
-		/* Bad block already retired by previous failed write */
-		return 0;
-	}
-
-	return 1;
-}
-
 static int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 				unsigned int sentry, struct ppa_addr *ppa_list,
 				struct pblk_sec_meta *meta_list,
@@ -880,10 +863,10 @@ static int pblk_map_rr_page(struct pblk *pblk, unsigned int sentry,
 	int is_gc = 0; //TODO: Fix for now
 	int ret = 0;
 
-try:
 	rlun = pblk_get_lun_rr(pblk, is_gc);
 	lun = rlun->parent;
 
+try:
 	/* TODO: This should follow a richer heuristic */
 	if (lun->nr_free_blocks < pblk->nr_luns * 4) {
 		//XXX: Other?
@@ -1140,8 +1123,7 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 
 		prev_ppa.ppa = ppa.ppa;
 
-		if (pblk_cur_is_bb(w_ctx->ppa.rblk))
-			pblk_run_recovery(pblk, w_ctx->ppa.rblk);
+		pblk_run_recovery(pblk, w_ctx->ppa.rblk);
 	}
 
 	ret = pblk_setup_rec_end_rq(pblk, ctx, recovery, comp_bits, c_entries);
@@ -1439,18 +1421,24 @@ int pblk_read_rq(struct pblk *pblk, struct bio *bio, struct nvm_rq *rqd,
 	/* int is_gc = *flags & PBLK_IOTYPE_GC; */
 	struct pblk_addr *gp;
 
-	if (laddr == ADDR_EMPTY)
+	if (laddr == ADDR_EMPTY) {
+		WARN_ON(test_and_set_bit(0, read_bitmap));
 		goto done;
+	}
 
 	BUG_ON(!(laddr >= 0 && laddr < pblk->nr_secs));
 
 	gp = &pblk->trans_map[laddr];
 
-	if (ppa_empty(gp->ppa))
+	if (ppa_empty(gp->ppa)) {
+		WARN_ON(test_and_set_bit(0, read_bitmap));
 		goto done;
+	}
 
-	if (pblk_try_read_from_cache(pblk, bio, gp))
+	if (pblk_try_read_from_cache(pblk, bio, gp)) {
+		WARN_ON(test_and_set_bit(0, read_bitmap));
 		goto done;
+	}
 
 	if (!gp->rblk)
 		goto done;
@@ -2046,11 +2034,11 @@ static void pblk_submit_write(struct work_struct *work)
 	secs_to_sync = pblk_calc_secs_to_sync(pblk, secs_avail, secs_to_flush);
 	if (secs_to_sync < 0) {
 		pr_err("pblk: bad buffer sync calculation\n");
-		goto end_unlock;
+		goto end_rollback;
 	}
 
 	if (!secs_to_sync)
-		goto end_unlock;
+		goto end_rollback;
 
 	pgs_read = pblk_rb_read_to_bio(&pblk->rwb, bio, ctx, secs_to_sync,
 							&sync_point);
@@ -2090,7 +2078,7 @@ fail_sync:
 	 * deadlock in the case that no new I/Os are coming in.
 	 */
 	queue_work(pblk->kw_wq, &pblk->ws_writer);
-end_unlock:
+end_rollback:
 	pblk_rb_read_rollback(&pblk->rwb);
 fail_bio:
 	bio_put(bio);
@@ -2776,6 +2764,8 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	atomic_set(&pblk->inflight_reads, 0);
 	atomic_set(&pblk->sync_reads, 0);
 	atomic_set(&pblk->recov_writes, 0);
+	atomic_set(&pblk->recov_gc_writes, 0);
+	atomic_set(&pblk->requeued_writes, 0);
 #endif
 
 	ret = pblk_area_init(pblk, &soffset);
@@ -2850,7 +2840,7 @@ static void pblk_print_debug(void *private)
 	struct pblk_block *rblk;
 	unsigned int i;
 
-	pr_info("pblk: %u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
+	pr_info("pblk: %u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
 				atomic_read(&pblk->inflight_writes),
 				atomic_read(&pblk->inflight_reads),
 				atomic_read(&pblk->req_writes),
@@ -2858,13 +2848,28 @@ static void pblk_print_debug(void *private)
 				atomic_read(&pblk->sub_writes),
 				atomic_read(&pblk->sync_writes),
 				atomic_read(&pblk->compl_writes),
-				atomic_read(&pblk->sync_reads),
-				atomic_read(&pblk->recov_writes));
+				atomic_read(&pblk->recov_writes),
+				atomic_read(&pblk->recov_gc_writes),
+				atomic_read(&pblk->requeued_writes),
+				atomic_read(&pblk->sync_reads));
 
 	pblk_rb_print_debug(&pblk->rwb);
 
 	pblk_for_each_lun(pblk, rlun, i) {
 		spin_lock(&rlun->lock_lists);
+		pr_info("LUN:%d\n", rlun->parent->id);
+
+		/* Print grown bad blocks not yet retired */
+		list_for_each_entry(rblk, &rlun->bb_list, list) {
+			spin_lock(&rblk->lock);
+			pr_info("pblk:bad:\tblk:%lu\t%u\n",
+				rblk->parent->id,
+				bitmap_weight(rblk->pages,
+						pblk->dev->sec_per_blk));
+			spin_unlock(&rblk->lock);
+		}
+
+		/* Print open blocks */
 		list_for_each_entry(rblk, &rlun->open_list, list) {
 			spin_lock(&rblk->lock);
 			pr_info("pblk:open:\tblk:%lu\t%u\t%u\t%u\t%u\t%u\t%u\n",

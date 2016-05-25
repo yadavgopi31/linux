@@ -49,7 +49,6 @@ enum {
 	PBLK_IOTYPE_REC = 32,
 
 	PBLK_IOTYPE_TEST = 128,
-
 };
 
 enum {
@@ -308,6 +307,8 @@ struct pblk {
 	atomic_t inflight_reads;	/* Inflight sector read requests */
 	atomic_t sync_reads;		/* Completed sector read requests */
 	atomic_t recov_writes;		/* Sectors submitted from recovery */
+	atomic_t recov_gc_writes;	/* Sectors submitted from recovery GC */
+	atomic_t requeued_writes;	/* Sectors requeued in cache */
 #endif
 
 	spinlock_t bio_lock;
@@ -460,6 +461,7 @@ static inline void pblk_free_ref_mem(struct kref *ref)
 	void *data;
 
 	//JAVIER!!!
+	return;
 	// printk(KERN_CRIT "FREE DATA!!\n");
 
 	ref_buf = container_of(ref, struct pblk_kref_buf, ref);
