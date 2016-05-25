@@ -59,36 +59,6 @@ static void pblk_invalidate_range(struct pblk *pblk, sector_t slba,
 	}
 }
 
-#if 0
-static struct pblk_rq *pblk_inflight_laddr_acquire(struct pblk *pblk,
-					sector_t laddr, unsigned int pages)
-{
-	struct pblk_rq *rrqd;
-	struct pblk_inflight_rq *inf;
-
-	rrqd = mempool_alloc(pblk->rrq_pool, GFP_ATOMIC);
-	if (!rrqd)
-		return ERR_PTR(-ENOMEM);
-	memset(rrqd, 0, sizeof(struct pblk_rq));
-	kref_init(&rrqd->refs);
-
-	rrqd->pblk = pblk;
-
-	inf = pblk_get_inflight_rq(rrqd);
-	if (pblk_lock_laddr(pblk, laddr, pages, inf)) {
-		mempool_free(rrqd, pblk->rrq_pool);
-		return NULL;
-	}
-
-	return rrqd;
-}
-
-static void pblk_inflight_laddr_release(struct pblk *pblk, struct pblk_rq *rrqd)
-{
-	kref_put(&rrqd->refs, pblk_release_and_free_rrqd);
-}
-#endif
-
 static void pblk_discard(struct pblk *pblk, struct bio *bio)
 {
 	sector_t slba = bio->bi_iter.bi_sector / NR_PHY_IN_LOG;
@@ -477,141 +447,6 @@ static void pblk_end_close_blk_bio(struct pblk *pblk, struct nvm_rq *rqd,
 	kfree(rqd);
 }
 
-/*
- * pblk_move_valid_pages -- migrate live data off the block
- * @pblk: the 'pblk' structure
- * @block: the block from which to migrate live pages
- *
- * Description:
- *   GC algorithms may call this function to migrate remaining live
- *   pages off the block prior to erasing it. This function blocks
- *   further execution until the operation is complete.
- */
-static int pblk_move_valid_pages(struct pblk *pblk, struct pblk_block *rblk)
-{
-	return 0;
-#if 0
-	struct request_queue *q = pblk->dev->q;
-	struct pblk_rev_addr *rev;
-	struct pblk_rq *rrqd;
-	struct bio *bio;
-	struct page *page;
-	int slot;
-	int nr_sec_per_blk = pblk->dev->sec_per_blk;
-	int ret;
-	u64 phys_addr;
-	DECLARE_COMPLETION_ONSTACK(wait);
-
-	if (bitmap_full(rblk->invalid_pages, nr_sec_per_blk))
-		return 0;
-
-	bio = bio_alloc(GFP_NOIO, 1);
-	if (!bio) {
-		pr_err("nvm: could not alloc bio to gc\n");
-		return -ENOMEM;
-	}
-
-	page = mempool_alloc(pblk->page_pool, GFP_NOIO);
-	if (!page) {
-		bio_put(bio);
-		return -ENOMEM;
-	}
-
-	while ((slot = find_first_zero_bit(rblk->invalid_pages,
-					nr_sec_per_blk)) < nr_sec_per_blk) {
-
-		/* Lock laddr */
-		phys_addr = (rblk->parent->id * nr_sec_per_blk) + slot;
-
-try:
-		spin_lock(&pblk->rev_lock);
-		/* Get logical address from physical to logical table */
-		rev = &pblk->rev_trans_map[phys_addr - pblk->poffset];
-		/* already updated by previous regular write */
-		if (rev->addr == ADDR_EMPTY) {
-			spin_unlock(&pblk->rev_lock);
-			continue;
-		}
-
-		rrqd = pblk_inflight_laddr_acquire(pblk, rev->addr, 1);
-		if (IS_ERR_OR_NULL(rrqd)) {
-			spin_unlock(&pblk->rev_lock);
-			schedule();
-			goto try;
-		}
-
-		spin_unlock(&pblk->rev_lock);
-
-		/* Perform read to do GC */
-		bio->bi_iter.bi_sector = pblk_get_sector(rev->addr);
-		bio->bi_rw = READ;
-		bio->bi_private = &wait;
-		bio->bi_end_io = pblk_end_sync_bio;
-
-		/* TODO: may fail when EXP_PG_SIZE > PAGE_SIZE */
-		ret = bio_add_pc_page(q, bio, page, PBLK_EXPOSED_PAGE_SIZE, 0);
-		if (ret != PBLK_EXPOSED_PAGE_SIZE) {
-			pr_err("nvm: pblk: could not add page to bio in GC\n");
-			goto finished;
-		}
-
-		if (pblk_submit_io(pblk, bio, rrqd, PBLK_IOTYPE_GC)) {
-			pr_err("pblk: gc read failed.\n");
-			pblk_inflight_laddr_release(pblk, rrqd);
-			goto finished;
-		}
-		wait_for_completion_io(&wait);
-		if (bio->bi_error) {
-			pblk_inflight_laddr_release(pblk, rrqd);
-			goto finished;
-		}
-
-		bio_reset(bio);
-		reinit_completion(&wait);
-
-		bio->bi_iter.bi_sector = pblk_get_sector(rev->addr);
-		bio->bi_rw = WRITE;
-		bio->bi_private = &wait;
-		bio->bi_end_io = pblk_end_sync_bio;
-
-		bio_add_pc_page(q, bio, page, PBLK_EXPOSED_PAGE_SIZE, 0);
-
-		/* turn the command around and write the data back to a new
-		 * address
-		 */
-		if (pblk_submit_io(pblk, bio, rrqd, PBLK_IOTYPE_GC)
-							!= NVM_IO_DONE) {
-			/* If the I/O fails, the write make_rq routines will
-			 * unlock the laddr and clean rrqd
-			 */
-			pr_err("pblk: gc write failed.\n");
-			goto finished;
-		}
-		bio_endio(bio);
-		wait_for_completion_io(&wait);
-
-		/* Note that rrqd release happens in the normal path, so there
-		 * is no need to do it here
-		 */
-		if (bio->bi_error)
-			goto finished;
-
-		bio_reset(bio);
-	}
-
-finished:
-	mempool_free(page, pblk->page_pool);
-	bio_put(bio);
-
-	if (!bitmap_full(rblk->invalid_pages, nr_sec_per_blk)) {
-		pr_err("nvm: failed to garbage collect block\n");
-		return -EIO;
-	}
-
-	return 0;
-#endif
-}
-
 static void pblk_block_gc(struct work_struct *work)
 {
 	struct pblk_block_gc *gcb = container_of(work, struct pblk_block_gc,
@@ -627,8 +462,8 @@ static void pblk_block_gc(struct work_struct *work)
 	mempool_free(gcb, pblk->gcb_pool);
 	pr_debug("pblk: block '%lu' being reclaimed\n", rblk->parent->id);
 
-	if (pblk_move_valid_pages(pblk, rblk))
-		goto put_back;
+	/* if (pblk_move_valid_pages(pblk, rblk)) */
+		/* goto put_back; */
 
 	/* if (nvm_erase_blk(dev, rblk->parent)) */
 		/* goto put_back; */
