@@ -621,12 +621,25 @@ static struct nvm_lun *gen_get_lun(struct nvm_dev *dev, int lunid)
 	return &gn->luns[lunid].vlun;
 }
 
+static void gen_tgts_info_print(struct nvm_dev *dev)
+{
+	struct gen_dev *gn = dev->mp;
+	struct nvm_target *t;
+	struct nvm_tgt_type *tt;
+
+	mutex_lock(&gn->lock);
+	list_for_each_entry(t, &gn->targets, list) {
+		tt = t->type;
+		tt->print_debug(t->disk->private_data);
+	}
+	mutex_unlock(&gn->lock);
+}
+
 static void gen_lun_info_print(struct nvm_dev *dev)
 {
 	struct gen_dev *gn = dev->mp;
 	struct gen_lun *lun;
 	unsigned int i;
-
 
 	gen_for_each_lun(gn, lun, i) {
 		spin_lock(&lun->vlun.lock);
@@ -636,6 +649,8 @@ static void gen_lun_info_print(struct nvm_dev *dev)
 
 		spin_unlock(&lun->vlun.lock);
 	}
+
+	gen_tgts_info_print(dev);
 }
 
 static struct nvmm_type gen = {
