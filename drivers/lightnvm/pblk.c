@@ -2691,19 +2691,9 @@ static void pblk_print_debug(void *private)
 	pblk_rb_print_debug(&pblk->rwb);
 
 	pblk_for_each_lun(pblk, rlun, i) {
-		spin_lock(&rlun->lock_lists);
 		pr_info("LUN:%d\n", rlun->parent->id);
 
-		/* Print grown bad blocks not yet retired */
-		list_for_each_entry(rblk, &rlun->bb_list, list) {
-			spin_lock(&rblk->lock);
-			pr_info("pblk:bad:\tblk:%lu\t%u\n",
-				rblk->parent->id,
-				bitmap_weight(rblk->pages,
-						pblk->dev->sec_per_blk));
-			spin_unlock(&rblk->lock);
-		}
-
+		spin_lock(&rlun->lock_lists);
 		/* Print open blocks */
 		list_for_each_entry(rblk, &rlun->open_list, list) {
 			spin_lock(&rblk->lock);
@@ -2718,6 +2708,16 @@ static void pblk_print_debug(void *private)
 					bitmap_weight(rblk->invalid_pages,
 							pblk->dev->sec_per_blk),
 					rblk->nr_invalid_pages);
+			spin_unlock(&rblk->lock);
+		}
+
+		/* Print grown bad blocks not yet retired */
+		list_for_each_entry(rblk, &rlun->bb_list, list) {
+			spin_lock(&rblk->lock);
+			pr_info("pblk:bad:\tblk:%lu\t%u\n",
+				rblk->parent->id,
+				bitmap_weight(rblk->pages,
+						pblk->dev->sec_per_blk));
 			spin_unlock(&rblk->lock);
 		}
 		spin_unlock(&rlun->lock_lists);
