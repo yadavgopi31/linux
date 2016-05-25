@@ -432,6 +432,19 @@ static inline int ppa_to_slc(struct nvm_dev *dev, int slc_pg)
 	return dev->lptbl[slc_pg];
 }
 
+static inline struct ppa_addr addr_to_ppa(u64 paddr)
+{
+	struct ppa_addr ppa;
+
+	ppa.ppa = paddr;
+	return ppa;
+}
+
+static inline u64 ppa_to_addr(struct ppa_addr ppa)
+{
+	return ppa.ppa;
+}
+
 typedef blk_qc_t (nvm_tgt_make_rq_fn)(struct request_queue *, struct bio *);
 typedef sector_t (nvm_tgt_capacity_fn)(void *);
 typedef void *(nvm_tgt_init_fn)(struct nvm_dev *, struct gendisk *, int, int);
