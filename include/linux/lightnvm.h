@@ -482,7 +482,6 @@ typedef void (nvm_tgt_sysfs_init_fn)(struct nvm_target *);
 typedef void (nvm_tgt_sysfs_exit_fn)(struct nvm_target *);
 typedef ssize_t(nvm_tgt_sysfs_show_fn)(struct nvm_target *,
 				     struct attribute *, char *);
-typedef void (nvm_tgt_print_debug_fn)(void *);
 
 struct nvm_tgt_type {
 	const char *name;
@@ -500,9 +499,6 @@ struct nvm_tgt_type {
 	nvm_tgt_sysfs_init_fn *sysfs_init;
 	nvm_tgt_sysfs_exit_fn *sysfs_exit;
 	nvm_tgt_sysfs_show_fn *sysfs_show;
-
-	/* debugging */
-	nvm_tgt_print_debug_fn *print_debug;
 
 	/* For internal use */
 	struct list_head list;
@@ -605,10 +601,8 @@ extern int nvm_submit_ppa_list(struct nvm_dev *, struct ppa_addr *, int, int,
 extern int nvm_bb_tbl_fold(struct nvm_dev *, u8 *, int);
 extern int nvm_get_bb_tbl(struct nvm_dev *, struct ppa_addr, u8 *);
 
-#ifdef CONFIG_NVM_DEBUG
 int nvm_boundary_checks(struct nvm_dev *dev, struct ppa_addr *ppas,
 								int nr_ppas);
-#endif
 
 /* sysblk.c */
 #define NVM_SYSBLK_MAGIC 0x4E564D53 /* "NVMS" */
