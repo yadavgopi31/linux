@@ -436,6 +436,11 @@ typedef blk_qc_t (nvm_tgt_make_rq_fn)(struct request_queue *, struct bio *);
 typedef sector_t (nvm_tgt_capacity_fn)(void *);
 typedef void *(nvm_tgt_init_fn)(struct nvm_dev *, struct gendisk *, int, int);
 typedef void (nvm_tgt_exit_fn)(void *);
+typedef void (nvm_tgt_sysfs_init_fn)(struct nvm_target *);
+typedef void (nvm_tgt_sysfs_exit_fn)(struct nvm_target *);
+typedef ssize_t(nvm_tgt_sysfs_show_fn)(struct nvm_target *,
+				     struct attribute *, char *);
+typedef void (nvm_tgt_print_debug_fn)(void *);
 
 struct nvm_tgt_type {
 	const char *name;
@@ -449,6 +454,13 @@ struct nvm_tgt_type {
 	/* module-specific init/teardown */
 	nvm_tgt_init_fn *init;
 	nvm_tgt_exit_fn *exit;
+
+	nvm_tgt_sysfs_init_fn *sysfs_init;
+	nvm_tgt_sysfs_exit_fn *sysfs_exit;
+	nvm_tgt_sysfs_show_fn *sysfs_show;
+
+	/* debugging */
+	nvm_tgt_print_debug_fn *print_debug;
 
 	/* For internal use */
 	struct list_head list;
