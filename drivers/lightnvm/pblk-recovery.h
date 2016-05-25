@@ -1,0 +1,29 @@
+/*
+ * Copyright (C) 2015 IT University of Copenhagen (rrpc.c)
+ * Copyright (C) 2016 CNEX Labs
+ * Initial: Javier Gonzalez <jg@lightnvm.io>
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License version
+ * 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * Implementation of a physical block-device target for Open-channel SSDs.
+ */
+
+#ifndef PBLK_RECOVERY_H
+#define PBLK_RECOVERY_H
+
+void pblk_run_recovery(struct pblk *pblk, struct pblk_block *rblk);
+int pblk_setup_rec_end_rq(struct pblk *pblk, struct pblk_ctx *ctx,
+			  struct pblk_rec_ctx *recovery, u64 *comp_bits,
+			  unsigned int c_entries);
+
+int pblk_scan_recover_blk(struct pblk *pblk, struct pblk_block *rblk);
+void pblk_close_rblk_queue(struct work_struct *work);
+
+#endif
