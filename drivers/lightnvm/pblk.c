@@ -51,28 +51,23 @@ static void pblk_invalidate_range(struct pblk *pblk, sector_t slba,
 {
 	sector_t i;
 
+	spin_lock(&pblk->trans_lock);
 	for (i = slba; i < slba + nr_secs; i++) {
 		struct pblk_addr *gp = &pblk->trans_map[i];
 
 		pblk_page_invalidate(pblk, gp);
+		ppa_set_empty(&gp->ppa);
 		gp->rblk = NULL;
 	}
+	spin_unlock(&pblk->trans_lock);
 }
 
 static void pblk_discard(struct pblk *pblk, struct bio *bio)
 {
 	sector_t slba = bio->bi_iter.bi_sector / NR_PHY_IN_LOG;
 	sector_t nr_secs = bio->bi_iter.bi_size / PBLK_EXPOSED_PAGE_SIZE;
-	struct pblk_l2p_upd_ctx upd_ctx;
-	int ret;
-
-	do {
-		ret = pblk_lock_laddr(pblk, slba, nr_secs, &upd_ctx);
-		schedule();
-	} while (ret);
 
 	pblk_invalidate_range(pblk, slba, nr_secs);
-	pblk_unlock_laddr(pblk, &upd_ctx, PBLK_UNLOCK_ADDR_NORM);
 }
 
 static inline u64 pblk_next_free_sec(struct pblk *pblk, struct pblk_block *rblk)
@@ -999,7 +994,6 @@ static void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd,
 							uint8_t nr_secs)
 {
 	struct pblk_r_ctx *r_ctx = nvm_rq_to_pdu(rqd);
-	struct pblk_l2p_upd_ctx *upd_ctx = &r_ctx->upd_ctx;
 	struct bio *bio = rqd->bio;
 
 	if (r_ctx->flags & PBLK_IOTYPE_TEST)
@@ -1014,7 +1008,6 @@ static void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd,
 	if (r_ctx->flags & PBLK_IOTYPE_SYNC)
 		return;
 
-	pblk_unlock_rq(pblk, bio, upd_ctx, PBLK_UNLOCK_ADDR_INT);
 	bio_put(bio);
 	mempool_free(rqd, pblk->r_rq_pool);
 
@@ -1109,17 +1102,8 @@ rollback:
 static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 		unsigned long flags, unsigned int nr_entries, int *ret_val)
 {
-	int ret;
-	struct pblk_l2p_upd_ctx upd_ctx;
-
-	if (pblk_lock_rq(pblk, bio, &upd_ctx))
-		return 0;
-
-	ret = __pblk_write_to_cache(pblk, bio, flags, nr_entries,
-							&upd_ctx, ret_val);
-	pblk_unlock_rq(pblk, bio, &upd_ctx, PBLK_UNLOCK_ADDR_NORM);
-
-	return ret;
+	return __pblk_write_to_cache(pblk, bio, flags, nr_entries,
+							NULL, ret_val);
 }
 
 static int pblk_buffer_write(struct pblk *pblk, struct bio *bio,
@@ -1187,19 +1171,22 @@ static int pblk_read_ppalist_rq(struct pblk *pblk, struct bio *bio,
 			struct nvm_rq *rqd, unsigned long flags, int nr_secs,
 			unsigned long *read_bitmap)
 {
-	/* int is_gc = *flags & PBLK_IOTYPE_GC; */
-	/* int locked = 0; */
 	sector_t laddr = pblk_get_laddr(bio);
-	struct pblk_addr *gp;
 	int advanced_bio = 0;
 	int i, j = 0;
+	struct ppa_addr ppas[64];
 
 	BUG_ON(!(laddr >= 0 && laddr + nr_secs < pblk->nr_secs));
 
-	for (i = 0; i < nr_secs; i++) {
-		gp = &pblk->trans_map[laddr + i];
+	spin_lock(&pblk->trans_lock);
+	for (i = 0; i < nr_secs; i++)
+		ppas[i] = pblk->trans_map[laddr + i].ppa;
+	spin_unlock(&pblk->trans_lock);
 
-		if (ppa_empty(gp->ppa)) {
+	for (i = 0; i < nr_secs; i++) {
+		struct ppa_addr *p = &ppas[i];
+
+		if (ppa_empty(*p)) {
 			WARN_ON(test_and_set_bit(i, read_bitmap));
 			continue;
 		}
@@ -1209,7 +1196,7 @@ static int pblk_read_ppalist_rq(struct pblk *pblk, struct bio *bio,
 		 * list, which will later on be used to submit an I/O to the
 		 * device to retrieve data.
 		 */
-		if (nvm_addr_in_cache(gp->ppa)) {
+		if (nvm_addr_in_cache(*p)) {
 			WARN_ON(test_and_set_bit(i, read_bitmap));
 			if (unlikely(!advanced_bio)) {
 				/* This is at least a partially filled bio,
@@ -1219,23 +1206,13 @@ static int pblk_read_ppalist_rq(struct pblk *pblk, struct bio *bio,
 				bio_advance(bio, i * PBLK_EXPOSED_PAGE_SIZE);
 				advanced_bio = 1;
 			}
-			pblk_read_from_cache(pblk, bio, gp->ppa);
+			pblk_read_from_cache(pblk, bio, *p);
 		} else {
-			if (!gp->rblk) {
-				WARN_ON(test_and_set_bit(i, read_bitmap));
-				if (unlikely(!advanced_bio)) {
-					/* Same logic as above */
-					bio_advance(bio,
-						i * PBLK_EXPOSED_PAGE_SIZE);
-					advanced_bio = 1;
-				}
-			} else {
-				/* Fill ppa_list with the sectors that cannot be
-				 * read from cache
-				 */
-				rqd->ppa_list[j] = gp->ppa;
-				j++;
-			}
+			/* Fill ppa_list with the sectors that cannot be
+			 * read from cache
+			 */
+			rqd->ppa_list[j] = *p;
+			j++;
 		}
 
 		if (advanced_bio)
@@ -1263,7 +1240,9 @@ int pblk_read_rq(struct pblk *pblk, struct bio *bio, struct nvm_rq *rqd,
 
 	BUG_ON(!(laddr >= 0 && laddr < pblk->nr_secs));
 
+	spin_lock(&pblk->trans_lock);
 	gp = &pblk->trans_map[laddr];
+	spin_unlock(&pblk->trans_lock);
 
 	if (ppa_empty(gp->ppa)) {
 		WARN_ON(test_and_set_bit(0, read_bitmap));
@@ -1274,9 +1253,6 @@ int pblk_read_rq(struct pblk *pblk, struct bio *bio, struct nvm_rq *rqd,
 		WARN_ON(test_and_set_bit(0, read_bitmap));
 		goto done;
 	}
-
-	if (!gp->rblk)
-		goto done;
 
 	rqd->ppa_addr = gp->ppa;
 
@@ -1540,7 +1516,6 @@ static int pblk_submit_read(struct pblk *pblk, struct bio *bio,
 							unsigned long flags)
 {
 	struct nvm_rq *rqd;
-	struct pblk_r_ctx *r_ctx;
 	int ret;
 
 	rqd = mempool_alloc(pblk->r_rq_pool, GFP_KERNEL);
@@ -1550,17 +1525,10 @@ static int pblk_submit_read(struct pblk *pblk, struct bio *bio,
 		return NVM_IO_ERR;
 	}
 	memset(rqd, 0, pblk_r_rq_size);
-	r_ctx = nvm_rq_to_pdu(rqd);
-
-	if (pblk_lock_rq(pblk, bio, &r_ctx->upd_ctx))
-		return NVM_IO_REQUEUE;
 
 	ret = __pblk_submit_read(pblk, bio, rqd, flags);
-	if (ret) {
-		pblk_unlock_rq(pblk, bio, &r_ctx->upd_ctx,
-							PBLK_UNLOCK_ADDR_NORM);
+	if (ret)
 		mempool_free(rqd, pblk->r_rq_pool);
-	}
 
 	return ret;
 }
@@ -2119,9 +2087,6 @@ static int pblk_core_init(struct pblk *pblk)
 	if (pblk_rwb_init(pblk))
 		goto free_kw_wq;
 
-	spin_lock_init(&pblk->l2p_locks.lock);
-	INIT_LIST_HEAD(&pblk->l2p_locks.lock_list);
-
 	INIT_LIST_HEAD(&pblk->compl_list);
 
 	return 0;
@@ -2578,6 +2543,7 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 
 	bio_list_init(&pblk->requeue_bios);
 	spin_lock_init(&pblk->bio_lock);
+	spin_lock_init(&pblk->trans_lock);
 	INIT_WORK(&pblk->ws_requeue, pblk_requeue);
 	INIT_WORK(&pblk->ws_writer, pblk_submit_write);
 

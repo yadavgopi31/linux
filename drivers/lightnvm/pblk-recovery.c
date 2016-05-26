@@ -132,20 +132,34 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 	/* int is_gc = *flags & PBLK_IOTYPE_GC; */
 	/* int locked = 0; */
 	sector_t lba;
-	struct pblk_addr *gp;
 	int advanced_bio = 0;
 	int i, j = 0;
+	struct ppa_addr ppas[64];
 
 	(*valid_secs) = 0;
+
+	spin_lock(&pblk->trans_lock);
 	for (i = 0; i < nr_secs; i++) {
 		lba = lba_list[i];
 
 		if (lba == ADDR_EMPTY)
 			continue;
 
-		gp = &pblk->trans_map[lba];
+		ppas[i] = pblk->trans_map[lba].ppa;
+	}
+	spin_unlock(&pblk->trans_lock);
 
-		if (ppa_empty(gp->ppa)) {
+	for (i = 0; i < nr_secs; i++) {
+		struct ppa_addr *p = &ppas[i];
+
+		lba = lba_list[i];
+
+		if (lba == ADDR_EMPTY) {
+			WARN_ON(test_and_set_bit(i, read_bitmap));
+			continue;
+		}
+
+		if (ppa_empty(*p)) {
 			WARN_ON(test_and_set_bit(*valid_secs, read_bitmap));
 			continue;
 		}
@@ -159,7 +173,7 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 		 * list, which will later on be used to submit an I/O to the
 		 * device to retrieve data.
 		 */
-		if (nvm_addr_in_cache(gp->ppa)) {
+		if (nvm_addr_in_cache(*p)) {
 			WARN_ON(test_and_set_bit(*valid_secs, read_bitmap));
 			if (unlikely(!advanced_bio)) {
 				/* This is at least a partially filled bio,
@@ -169,23 +183,13 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 				bio_advance(bio, i * PBLK_EXPOSED_PAGE_SIZE);
 				advanced_bio = 1;
 			}
-			pblk_read_from_cache(pblk, bio, gp->ppa);
+			pblk_read_from_cache(pblk, bio, *p);
 		} else {
-			if (!gp->rblk) {
-				WARN_ON(test_and_set_bit(*valid_secs, read_bitmap));
-				if (unlikely(!advanced_bio)) {
-					/* Same logic as above */
-					bio_advance(bio,
-						i * PBLK_EXPOSED_PAGE_SIZE);
-					advanced_bio = 1;
-				}
-			} else {
-				/* Fill ppa_list with the sectors that cannot be
-				 * read from cache
-				 */
-				rqd->ppa_list[j] = gp->ppa;
-				j++;
-			}
+			/* Fill ppa_list with the sectors that cannot be
+			 * read from cache
+			 */
+			rqd->ppa_list[j] = *p;
+			j++;
 		}
 
 		if (advanced_bio)
@@ -373,22 +377,6 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 				continue;
 			}
 
-lock_retry:
-			if (pblk_lock_laddr(pblk, lba, 1, &upd_ctx[i])) {
-				/* Do not lock if locked within this lock set,
-				 * but still recover the lba since it is an
-				 * update.
-				 */
-				if (pblk_lock_overlap(pblk, lba, lba_list, off,
-								off + i - 1)) {
-					upd_ctx[i].l_start = ADDR_EMPTY;
-					upd_ctx[i].l_end = ADDR_EMPTY;
-					continue;
-				}
-				schedule();
-				goto lock_retry;
-			}
-
 			/* If lba is mapped to a different block it is not
 			 * necessary to recover it. Unlock the address and
 			 * ignore it.
@@ -398,11 +386,11 @@ lock_retry:
 			 * mapped to a bad block. This is to avoid double
 			 * recoveries.
 			 */
+			spin_lock(&pblk->trans_lock);
 			gp = &pblk->trans_map[lba];
+			spin_unlock(&pblk->trans_lock);
 			if (nvm_addr_in_cache(gp->ppa) ||
 			   (gp->rblk->parent->id != rblk->parent->id)) {
-				pblk_unlock_laddr(pblk, &upd_ctx[i],
-							PBLK_UNLOCK_ADDR_NORM);
 				upd_ctx[i].l_start = ADDR_EMPTY;
 				upd_ctx[i].l_end = ADDR_EMPTY;
 				lba_list[i + off] = ADDR_EMPTY;
@@ -478,15 +466,6 @@ write_retry:
 
 		bio_endio(bio);
 
-		/* Unlock addresses for current recovery I/O */
-		for (i = 0; i < secs_to_rec; i++) {
-			if (upd_ctx[i].l_start == ADDR_EMPTY)
-				continue;
-
-			pblk_unlock_laddr(pblk, &upd_ctx[i],
-							PBLK_UNLOCK_ADDR_NORM);
-		}
-
 next:
 		read_left -= secs_to_rec;
 		off += secs_to_rec;
@@ -516,8 +495,6 @@ fail_free_krefbuf:
 	for (i = 0; i < secs_to_rec; i++) {
 		if (upd_ctx[i].l_start == ADDR_EMPTY)
 			continue;
-
-		pblk_unlock_laddr(pblk, &upd_ctx[i], PBLK_UNLOCK_ADDR_NORM);
 	}
 
 	kfree(ref_buf);

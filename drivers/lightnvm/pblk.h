@@ -312,6 +312,7 @@ struct pblk {
 #endif
 
 	spinlock_t bio_lock;
+	spinlock_t trans_lock;
 	struct bio_list requeue_bios;
 	struct work_struct ws_requeue;
 	struct work_struct ws_writer;
@@ -321,7 +322,6 @@ struct pblk {
 	 * addresses are used when writing to the disk block device.
 	 */
 	struct pblk_addr *trans_map;
-	struct pblk_locked_list l2p_locks;
 
 	struct list_head compl_list;
 
@@ -581,12 +581,14 @@ static inline void pblk_update_map(struct pblk *pblk, sector_t laddr,
 
 	BUG_ON(laddr >= pblk->nr_secs);
 
+	spin_lock(&pblk->trans_lock);
 	gp = &pblk->trans_map[laddr];
 	if (gp->rblk)
 		pblk_page_invalidate(pblk, gp);
 
 	gp->ppa = ppa;
 	gp->rblk = rblk;
+	spin_unlock(&pblk->trans_lock);
 }
 
 static inline struct pblk_block *pblk_get_rblk(struct pblk_lun *rlun,
@@ -621,101 +623,6 @@ static inline int block_is_bad(struct pblk_block *rblk)
 static inline int block_is_full(struct pblk *pblk, struct pblk_block *rblk)
 {
 	return (bitmap_full(rblk->pages, pblk->nr_blk_dsecs));
-}
-
-static inline int rqd_intersects(struct pblk_l2p_upd_ctx *r,
-				sector_t laddr_start, sector_t laddr_end)
-{
-	return (laddr_end >= r->l_start) && (laddr_start <= r->l_end);
-}
-
-static int __pblk_lock_laddr(struct pblk *pblk, sector_t laddr,
-				unsigned pages, struct pblk_l2p_upd_ctx *r)
-{
-	sector_t laddr_end = laddr + pages - 1;
-	struct pblk_l2p_upd_ctx *rtmp;
-
-	spin_lock_irq(&pblk->l2p_locks.lock);
-	list_for_each_entry(rtmp, &pblk->l2p_locks.lock_list, list) {
-		if (unlikely(rqd_intersects(rtmp, laddr, laddr_end))) {
-			/* existing, overlapping request, come back later */
-			spin_unlock_irq(&pblk->l2p_locks.lock);
-			return 1;
-		}
-	}
-
-	r->l_start = laddr;
-	r->l_end = laddr_end;
-
-	list_add_tail(&r->list, &pblk->l2p_locks.lock_list);
-	spin_unlock_irq(&pblk->l2p_locks.lock);
-
-	return 0;
-}
-
-static inline int pblk_lock_laddr(struct pblk *pblk, sector_t laddr,
-				unsigned pages, struct pblk_l2p_upd_ctx *r)
-{
-	BUG_ON((laddr + pages) > pblk->nr_secs);
-
-	return __pblk_lock_laddr(pblk, laddr, pages, r);
-}
-
-static inline int pblk_lock_rq(struct pblk *pblk, struct bio *bio,
-					struct pblk_l2p_upd_ctx *l2p_ctx)
-{
-	sector_t laddr = pblk_get_laddr(bio);
-	unsigned int pages = pblk_get_pages(bio);
-
-	return pblk_lock_laddr(pblk, laddr, pages, l2p_ctx);
-}
-
-#define PBLK_UNLOCK_ADDR_INT 0
-#define PBLK_UNLOCK_ADDR_NORM 1
-
-static inline void pblk_unlock_laddr(struct pblk *pblk,
-				struct pblk_l2p_upd_ctx *r, int int_flags)
-{
-#ifdef CONFIG_NVM_DEBUG
-	BUG_ON(!r);
-	BUG_ON(!r->list.prev);
-	BUG_ON(!r->list.next);
-#endif
-
-	if (int_flags == PBLK_UNLOCK_ADDR_INT) {
-		unsigned long flags;
-
-		spin_lock_irqsave(&pblk->l2p_locks.lock, flags);
-		list_del_init(&r->list);
-		spin_unlock_irqrestore(&pblk->l2p_locks.lock, flags);
-	} else {
-		spin_lock_irq(&pblk->l2p_locks.lock);
-		list_del_init(&r->list);
-		spin_unlock_irq(&pblk->l2p_locks.lock);
-	}
-}
-
-static inline void pblk_unlock_rq(struct pblk *pblk, struct bio *bio,
-				struct pblk_l2p_upd_ctx *l2p_ctx, int int_flags)
-{
-	unsigned int nr_secs = pblk_get_pages(bio);
-
-	BUG_ON((l2p_ctx->l_start + nr_secs) > pblk->nr_secs);
-
-	pblk_unlock_laddr(pblk, l2p_ctx, int_flags);
-}
-
-static inline int pblk_lock_overlap(struct pblk *pblk, u64 lba, u64 *lba_list,
-							int min, int max)
-{
-	int i;
-
-	for (i = min; i < max; i++) {
-		if (lba_list[i] == lba)
-			return 1;
-	}
-
-	return 0;
 }
 
 #endif /* PBLK_H_ */

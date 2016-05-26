@@ -286,22 +286,6 @@ static int __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned long *l2p_upd,
 		BUG_ON(!rblk);
 #endif
 
-try:
-		/* Cannot sleep. If the address is locked, it is not for long */
-		if (pblk_lock_laddr(pblk, w_ctx->lba, 1, upd_ctx)) {
-			/* The address will be overwritten during this write, so
-			 * we do not need to update the map. Since the lock is
-			 * taken on the address, reads waiting will see the new
-			 * value.
-			 */
-			if (lock_list &&
-			    rqd_intersects(lock_list, w_ctx->lba, w_ctx->lba)) {
-				pblk_rb_update_map(pblk, w_ctx);
-				goto next;
-			}
-			goto try;
-		}
-
 		/* Grown bad block. For now, we requeue the entry to the write
 		 * buffer and make it take the normal path to get a new ppa
 		 * mapping. Since the requeue takes a place on the buffer,
@@ -318,11 +302,8 @@ try:
 		}
 
 		pblk_rb_update_map(pblk, w_ctx);
-
 next_unlock:
-		pblk_unlock_laddr(pblk, upd_ctx, PBLK_UNLOCK_ADDR_NORM);
 		clean_wctx(w_ctx);
-next:
 		l2p_upd_l = (l2p_upd_l + 1) & (rb->nr_entries - 1);
 	}
 
