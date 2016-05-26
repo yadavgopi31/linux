@@ -136,18 +136,17 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 	int advanced_bio = 0;
 	int i, j = 0;
 
+	(*valid_secs) = 0;
 	for (i = 0; i < nr_secs; i++) {
 		lba = lba_list[i];
 
-		if (lba == ADDR_EMPTY) {
-			WARN_ON(test_and_set_bit(i, read_bitmap));
+		if (lba == ADDR_EMPTY)
 			continue;
-		}
 
 		gp = &pblk->trans_map[lba];
 
 		if (ppa_empty(gp->ppa)) {
-			WARN_ON(test_and_set_bit(i, read_bitmap));
+			WARN_ON(test_and_set_bit(*valid_secs, read_bitmap));
 			continue;
 		}
 
@@ -161,7 +160,7 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 		 * device to retrieve data.
 		 */
 		if (nvm_addr_in_cache(gp->ppa)) {
-			WARN_ON(test_and_set_bit(i, read_bitmap));
+			WARN_ON(test_and_set_bit(*valid_secs, read_bitmap));
 			if (unlikely(!advanced_bio)) {
 				/* This is at least a partially filled bio,
 				 * advance it to copy data to the right place.
@@ -173,7 +172,7 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 			pblk_read_from_cache(pblk, bio, gp->ppa);
 		} else {
 			if (!gp->rblk) {
-				WARN_ON(test_and_set_bit(i, read_bitmap));
+				WARN_ON(test_and_set_bit(*valid_secs, read_bitmap));
 				if (unlikely(!advanced_bio)) {
 					/* Same logic as above */
 					bio_advance(bio,
@@ -279,7 +278,7 @@ static int pblk_submit_recov_read(struct pblk *pblk, struct bio *bio,
 	 * but there are some holes that need to be read from the drive.
 	 */
 	ret = pblk_fill_partial_read_bio(pblk, bio, &read_bitmap, rqd,
-								nr_secs);
+								valid_secs);
 	if (ret) {
 		pr_err("pblk: failed to perform partial read\n");
 		goto fail_ppa_free;
