@@ -128,6 +128,11 @@ static void memcpy_wctx(struct pblk_w_ctx *to, struct pblk_w_ctx *from)
 	to->priv = from->priv;
 }
 
+static void clean_wctx(struct pblk_w_ctx *w_ctx)
+{
+	memset(w_ctx, 0, sizeof(struct pblk_w_ctx));
+}
+
 #define pblk_rb_ring_count(head, tail, size) CIRC_CNT(head, tail, size)
 #define pblk_rb_ring_space(rb, head, tail, size) \
 	(CIRC_SPACE(head, tail, size) - rb->grace_area)
@@ -319,6 +324,7 @@ try:
 
 next_unlock:
 		pblk_unlock_laddr(pblk, upd_ctx, PBLK_UNLOCK_ADDR_NORM);
+		clean_wctx(w_ctx);
 next:
 		l2p_upd_l = (l2p_upd_l + 1) & (rb->nr_entries - 1);
 	}
@@ -655,6 +661,8 @@ unsigned long pblk_rb_sync_advance(struct pblk_rb *rb, unsigned int nr_entries)
 			ref_buf = w_ctx->priv;
 			if (kref_put(&ref_buf->ref, pblk_free_ref_mem))
 				w_ctx->priv = NULL;
+
+			w_ctx->flags &= ~PBLK_IOTYPE_REF;
 		}
 
 		sync = (sync + 1) & (rb->nr_entries - 1);
