@@ -481,12 +481,12 @@ static inline u64 pblk_gaddr_to_pg_offset(struct nvm_dev *dev,
 
 static inline struct ppa_addr pblk_cacheline_to_ppa(u64 addr)
 {
-	struct ppa_addr gp;
+	struct ppa_addr p;
 
-	gp.c.line = (u64)addr;
-	gp.c.is_cached = 1;
+	p.c.line = (u64)addr;
+	p.c.is_cached = 1;
 
-	return gp;
+	return p;
 }
 
 /* Calculate global addr for the given block */
