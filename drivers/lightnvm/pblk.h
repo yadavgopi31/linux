@@ -460,8 +460,6 @@ static inline void pblk_free_ref_mem(struct kref *ref)
 	struct pblk_kref_buf *ref_buf;
 	void *data;
 
-	// printk(KERN_CRIT "FREE DATA!!\n");
-
 	ref_buf = container_of(ref, struct pblk_kref_buf, ref);
 	data = ref_buf->data;
 

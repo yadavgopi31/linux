@@ -85,8 +85,6 @@ static int pblk_write_recov_to_cache(struct pblk *pblk, struct bio *bio,
 		w_ctx.priv = ref_buf;
 		kref_get(&ref_buf->ref);
 
-		/* printk(KERN_CRIT "GET REF:lba:%llu\n", lba_list[i]); */
-
 		data = bio_data(bio);
 		if (pblk_rb_write_entry(&pblk->rwb, data, w_ctx,
 							pos + valid_secs))
