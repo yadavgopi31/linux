@@ -39,24 +39,25 @@ static void pblk_free_recov_rqd(struct pblk *pblk, struct nvm_rq *rqd)
 //JAVIER:: Change name to indicate recovery */
 static int pblk_write_recov_to_cache(struct pblk *pblk, struct bio *bio,
 				      unsigned long flags, u64 *lba_list,
-				      unsigned int nr_entries, int *ret_val)
+				      struct pblk_kref_buf *ref_buf,
+				      unsigned int nr_secs,
+				      unsigned int nr_rec_secs, int *ret_val)
 {
 	struct pblk_w_ctx w_ctx;
 	struct ppa_addr ppa;
 	void *data;
 	struct bio *b = NULL;
-	struct pblk_kref_buf *ref_buf;
 	unsigned long pos;
 	unsigned int i, valid_secs = 0;
 
-	BUG_ON(!bio_has_data(bio));
+	BUG_ON(!bio_has_data(bio) || (nr_rec_secs != bio->bi_vcnt));
 
 	pblk_rb_write_init(&pblk->rwb);
 
-	if (pblk_rb_space(&pblk->rwb) < nr_entries)
+	if (pblk_rb_space(&pblk->rwb) < nr_secs)
 		goto rollback;
 
-	if (pblk_rb_update_l2p(&pblk->rwb, nr_entries, NULL))
+	if (pblk_rb_update_l2p(&pblk->rwb, nr_secs, NULL))
 		goto rollback;
 
 	pos = pblk_rb_write_pos(&pblk->rwb);
@@ -69,7 +70,7 @@ static int pblk_write_recov_to_cache(struct pblk *pblk, struct bio *bio,
 		*ret_val = NVM_IO_DONE;
 	}
 
-	for (i = 0, valid_secs = 0; i < nr_entries; i++) {
+	for (i = 0, valid_secs = 0; i < nr_secs; i++) {
 		if (lba_list[i] == ADDR_EMPTY)
 			continue;
 
@@ -81,7 +82,6 @@ static int pblk_write_recov_to_cache(struct pblk *pblk, struct bio *bio,
 #ifdef CONFIG_NVM_DEBUG
 		BUG_ON(!(flags & PBLK_IOTYPE_REF));
 #endif
-		ref_buf = bio->bi_private;
 		w_ctx.priv = ref_buf;
 		kref_get(&ref_buf->ref);
 
@@ -94,10 +94,14 @@ static int pblk_write_recov_to_cache(struct pblk *pblk, struct bio *bio,
 		valid_secs++;
 	}
 
+#ifdef CONFIG_NVM_DEBUG
+	BUG_ON(nr_rec_secs != valid_secs);
+#endif
+
 	/* Update mapping table with the write buffer cachelines. Do it after
 	 * the data is written to the buffer to enable atomic rollback
 	 */
-	for (i = 0, valid_secs = 0; i < nr_entries; i++) {
+	for (i = 0, valid_secs = 0; i < nr_secs; i++) {
 		if (lba_list[i] == ADDR_EMPTY)
 			continue;
 
@@ -198,7 +202,9 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 
 static int pblk_submit_recov_read(struct pblk *pblk, struct bio *bio,
 				   struct nvm_rq *rqd, u64 *lba_list,
-				   unsigned int nr_secs, unsigned long flags)
+				   unsigned int nr_secs,
+				   unsigned int nr_rec_secs,
+				   unsigned long flags)
 {
 	struct pblk_r_ctx *r_ctx = nvm_rq_to_pdu(rqd);
 	unsigned long read_bitmap; /* Max 64 ppas per request */
@@ -214,7 +220,7 @@ static int pblk_submit_recov_read(struct pblk *pblk, struct bio *bio,
 		return NVM_IO_ERR;
 	}
 
-	if (nr_secs != bio->bi_vcnt)
+	if (nr_rec_secs != bio->bi_vcnt)
 		return NVM_IO_ERR;
 
 	if (nr_secs > 1) {
@@ -252,6 +258,8 @@ static int pblk_submit_recov_read(struct pblk *pblk, struct bio *bio,
 	} else if (bitmap_empty(&read_bitmap, nr_secs)) {
 #ifdef CONFIG_NVM_DEBUG
 		struct ppa_addr *ppa_list;
+
+		BUG_ON(nr_rec_secs != valid_secs);
 
 		ppa_list = (rqd->nr_ppas > 1) ? rqd->ppa_list : &rqd->ppa_addr;
 		if (nvm_boundary_checks(pblk->dev, ppa_list, rqd->nr_ppas))
@@ -305,7 +313,7 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 	u64 *lba_list = pblk_rlpg_to_llba(rlpg);
 	u64 lba;
 	unsigned int bio_len;
-	unsigned int nr_entries, alloc_entries, secs_to_rec;
+	unsigned int nr_entries, alloc_entries, secs_to_rec, secs_in_disk;
 	unsigned int read_left, ignored;
 	int max = pblk->max_write_pgs;
 	int i, off;
@@ -335,13 +343,13 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 		goto out;
 	}
 
-	data = kzalloc(alloc_entries * dev->sec_size, GFP_KERNEL);
+	data = kmalloc(alloc_entries * dev->sec_size, GFP_KERNEL);
 	if (!data) {
 		pr_err("pblk: could not allocate recovery buffer\n");
 		goto fail_free_ctx;
 	}
 
-	ref_buf = kzalloc(sizeof(struct pblk_kref_buf), GFP_KERNEL);
+	ref_buf = kmalloc(sizeof(struct pblk_kref_buf), GFP_KERNEL);
 	if (!ref_buf) {
 		pr_err("pblk: could not allocate recovery buffer\n");
 		goto fail_free_data;
@@ -411,8 +419,10 @@ lock_retry:
 		if (ignored == secs_to_rec)
 			goto next;
 
+		secs_in_disk = secs_to_rec - ignored;
+
 		/* Read from grown bad block */
-		bio_len = secs_to_rec * dev->sec_size;
+		bio_len = secs_in_disk * dev->sec_size;
 		bio = bio_map_kern(q, data, bio_len, GFP_KERNEL);
 		if (!bio) {
 			pr_err("pblk: could not allocate recovery bio\n");
@@ -432,7 +442,8 @@ lock_retry:
 		memset(rqd, 0, pblk_r_rq_size);
 
 		ret = pblk_submit_recov_read(pblk, bio, rqd, &lba_list[off],
-						secs_to_rec, PBLK_IOTYPE_TEST);
+						secs_to_rec, secs_in_disk,
+						PBLK_IOTYPE_TEST);
 						/* secs_to_rec, PBLK_IOTYPE_SYNC); */
 		if (ret == NVM_IO_OK) {
 			wait_for_completion_io(&wait);
@@ -461,11 +472,11 @@ lock_retry:
 
 		bio->bi_iter.bi_sector = 0; /* artificial bio */
 		bio->bi_rw = WRITE;
-		bio->bi_private = ref_buf;
 write_retry:
 		/* Writes to the buffer fail due to lack of space */
 		if (!pblk_write_recov_to_cache(pblk, bio, PBLK_IOTYPE_REF,
-					&lba_list[off], secs_to_rec, &ret)) {
+					&lba_list[off], ref_buf, secs_to_rec,
+					secs_in_disk, &ret)) {
 			schedule();
 			goto write_retry;
 		}
@@ -501,7 +512,6 @@ next:
 	if (pblk_rb_count(&pblk->rwb) >= pblk->min_write_pgs)
 		queue_work(pblk->kw_wq, &pblk->ws_writer);
 
-
 	mempool_free(gcb, pblk->gcb_pool);
 	return;
 
@@ -522,7 +532,6 @@ fail_free_ctx:
 	kfree(upd_ctx);
 out:
 	spin_unlock(&rblk->lock);
-
 	mempool_free(gcb, pblk->gcb_pool);
 }
 
@@ -867,7 +876,11 @@ static void pblk_close_rblk(struct pblk *pblk, struct pblk_block *rblk)
 	u64 paddr;
 	int i;
 
-	BUG_ON(rblk->rlpg->nr_lbas + rblk->rlpg->nr_padded != nr_entries);
+#ifdef CONFIG_NVM_DEBUG
+	if (!block_is_bad(rblk))
+		BUG_ON(rblk->rlpg->nr_lbas + rblk->rlpg->nr_padded !=
+								nr_entries);
+#endif
 
 	rblk->rlpg->status = PBLK_BLK_ST_CLOSED;
 	crc = crc32_le(crc, (unsigned char *)rblk->rlpg + sizeof(crc),
@@ -942,7 +955,9 @@ void pblk_close_rblk_queue(struct work_struct *work)
 	struct pblk *pblk = gcb->pblk;
 	struct pblk_block *rblk = gcb->rblk;
 
-	pblk_close_rblk(pblk, rblk);
+	if (likely(!block_is_bad(rblk)))
+		pblk_close_rblk(pblk, rblk);
+
 	kfree(rblk->sync_bitmap);
 	rblk->sync_bitmap = NULL;
 	mempool_free(gcb, pblk->gcb_pool);

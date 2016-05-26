@@ -653,7 +653,8 @@ unsigned long pblk_rb_sync_advance(struct pblk_rb *rb, unsigned int nr_entries)
 
 			BUG_ON(!w_ctx->priv);
 			ref_buf = w_ctx->priv;
-			kref_put(&ref_buf->ref, pblk_free_ref_mem);
+			if (kref_put(&ref_buf->ref, pblk_free_ref_mem))
+				w_ctx->priv = NULL;
 		}
 
 		sync = (sync + 1) & (rb->nr_entries - 1);
