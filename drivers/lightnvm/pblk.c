@@ -1069,7 +1069,6 @@ static int __pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 	 * write transaction. This enables atomic rollback.
 	 */
 	pblk_rb_write_commit(&pblk->rwb, nr_entries);
-	pblk_rb_write_unlock(&pblk->rwb);
 
 	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA)) {
 		b = bio;
@@ -1099,6 +1098,7 @@ static int __pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 		pblk_update_map(pblk, laddr + i, NULL, ppa);
 	}
 
+	pblk_rb_write_unlock(&pblk->rwb);
 	return 0;
 }
 
