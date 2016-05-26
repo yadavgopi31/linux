@@ -706,7 +706,8 @@ int pblk_setup_rec_end_rq(struct pblk *pblk, struct pblk_ctx *ctx,
 	/* Save the context for the entries that need to be re-written and
 	 * update current context with the completed entries.
 	 */
-	rec_c_ctx->sentry = c_ctx->sentry + c_entries;
+	rec_c_ctx->sentry = pblk_rb_wrap_pos(&pblk->rwb,
+						c_ctx->sentry + c_entries);
 	if (c_entries >= c_ctx->nr_valid) {
 		/* Recovery context */
 		rec_c_ctx->nr_valid = 0;
