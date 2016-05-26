@@ -331,10 +331,12 @@ struct pblk {
 	mempool_t *r_rq_pool;
 	mempool_t *w_rq_pool;
 
-	struct timer_list gc_timer;
 	struct workqueue_struct *krqd_wq;
 	struct workqueue_struct *kgc_wq;
 	struct workqueue_struct *kw_wq;
+
+	struct timer_list gc_timer;
+	int gc_timeouts;
 };
 
 struct pblk_block_gc {

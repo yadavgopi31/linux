@@ -326,7 +326,7 @@ static void pblk_gc_kick(struct pblk *pblk)
 	}
 }
 
-static void pblk_writer_kick(struct pblk *pblk)
+static void pblk_write_kick(struct pblk *pblk)
 {
 	queue_work(pblk->kw_wq, &pblk->ws_writer);
 }
@@ -418,8 +418,12 @@ static void pblk_gc_timer(unsigned long data)
 {
 	struct pblk *pblk = (struct pblk *)data;
 
-	pblk_gc_kick(pblk);
-	mod_timer(&pblk->gc_timer, jiffies + msecs_to_jiffies(10));
+	if (++pblk->gc_timeouts % 30 == 0)
+		pblk_gc_kick(pblk);
+
+	pblk_write_kick(pblk);
+
+	mod_timer(&pblk->gc_timer, jiffies + msecs_to_jiffies(1000));
 }
 
 void pblk_end_sync_bio(struct bio *bio)
@@ -992,7 +996,7 @@ static void pblk_end_io_write(struct pblk *pblk, struct nvm_rq *rqd)
 		return pblk_end_w_pad(pblk, rqd, ctx);
 
 	pblk_compl_queue(pblk, rqd, ctx);
-	pblk_writer_kick(pblk);
+	pblk_write_kick(pblk);
 }
 
 static void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd,
@@ -1131,7 +1135,7 @@ static int pblk_buffer_write(struct pblk *pblk, struct bio *bio,
 	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA)) {
 		if (!bio_has_data(bio)) {
 			ret = pblk_rb_sync_point_set(&pblk->rwb, bio);
-			queue_work(pblk->kw_wq, &pblk->ws_writer);
+			pblk_write_kick(pblk);
 			goto out;
 		}
 
@@ -1147,10 +1151,6 @@ static int pblk_buffer_write(struct pblk *pblk, struct bio *bio,
 	atomic_add(nr_secs, &pblk->inflight_writes);
 	atomic_add(nr_secs, &pblk->req_writes);
 #endif
-
-	/* Use count as a heuristic for setting up a job in workqueue */
-	if (pblk_rb_count(&pblk->rwb) >= pblk->min_write_pgs)
-		queue_work(pblk->kw_wq, &pblk->ws_writer);
 
 out:
 	return ret;
@@ -1914,7 +1914,7 @@ fail_sync:
 	/* Fail is probably caused by a locked lba - kick the queue to avoid a
 	 * deadlock in the case that no new I/Os are coming in.
 	 */
-	queue_work(pblk->kw_wq, &pblk->ws_writer);
+	pblk_write_kick(pblk);
 end_rollback:
 	pblk_rb_read_rollback(&pblk->rwb);
 fail_bio:
@@ -1960,6 +1960,7 @@ static int pblk_gc_init(struct pblk *pblk)
 	if (!pblk->kgc_wq)
 		return -ENOMEM;
 
+	pblk->gc_timeouts = 0;
 	setup_timer(&pblk->gc_timer, pblk_gc_timer, (unsigned long)pblk);
 
 	return 0;
@@ -2661,7 +2662,7 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	pr_info("pblk initialized with %u luns and %llu pages.\n",
 			pblk->nr_luns, (unsigned long long)pblk->nr_secs);
 
-	mod_timer(&pblk->gc_timer, jiffies + msecs_to_jiffies(10));
+	mod_timer(&pblk->gc_timer, jiffies + msecs_to_jiffies(1000));
 
 	return pblk;
 err:
