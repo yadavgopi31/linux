@@ -56,9 +56,9 @@ int pblk_rb_init(struct pblk_rb *rb, struct pblk_rb_entry *rb_entry_base,
 	}
 
 	spin_lock_init(&rb->w_lock);
+	spin_lock_init(&rb->r_lock);
 	spin_lock_init(&rb->s_lock);
-	spin_lock_init(&rb->sy_lock);
-	spin_lock_init(&rb->u_lock);
+	spin_lock_init(&rb->l2p_lock);
 
 	for (i = 0; i < rb->nr_entries; i++) {
 		entry = &rb->entries[i];
@@ -166,11 +166,11 @@ unsigned long pblk_rb_count_init(struct pblk_rb *rb)
 	unsigned long subm = READ_ONCE(rb->subm);
 	unsigned long ret;
 
-	spin_lock(&rb->s_lock);
+	spin_lock(&rb->r_lock);
 
 	ret = pblk_rb_ring_count(mem, subm, rb->nr_entries);
 	if (!ret)
-		spin_unlock(&rb->s_lock);
+		spin_unlock(&rb->r_lock);
 	return ret;
 }
 
@@ -183,11 +183,11 @@ void pblk_rb_read_commit(struct pblk_rb *rb, unsigned int nr_entries)
 {
 	unsigned long subm;
 
-	lockdep_assert_held(&rb->s_lock);
+	lockdep_assert_held(&rb->r_lock);
 
 	subm = READ_ONCE(rb->subm);
 	smp_store_release(&rb->subm, (subm + nr_entries) & (rb->nr_entries - 1));
-	spin_unlock(&rb->s_lock);
+	spin_unlock(&rb->r_lock);
 }
 
 /**
@@ -205,11 +205,11 @@ void pblk_rb_read_rollback(struct pblk_rb *rb)
 {
 	unsigned long subm;
 
-	lockdep_assert_held(&rb->s_lock);
+	lockdep_assert_held(&rb->r_lock);
 
 	subm = READ_ONCE(rb->subm);
 	smp_store_release(&rb->subm, subm);
-	spin_unlock(&rb->s_lock);
+	spin_unlock(&rb->r_lock);
 }
 
 static void pblk_rb_requeue_entry(struct pblk_rb *rb,
@@ -262,7 +262,7 @@ static int __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned long *l2p_upd,
 	unsigned long i;
 	int ret = 0;
 
-	lockdep_assert_held(&rb->u_lock);
+	lockdep_assert_held(&rb->l2p_lock);
 
 	for (i = 0; i < to_update; i++) {
 		/* Respect the update limit - count(sync, l2p_upd) */
@@ -340,7 +340,7 @@ int pblk_rb_update_l2p(struct pblk_rb *rb, unsigned int nr_entries,
 	unsigned long l2p_upd, mem, sync;
 	int ret = 0;
 
-	spin_lock(&rb->u_lock);
+	spin_lock(&rb->l2p_lock);
 
 	l2p_upd = smp_load_acquire(&rb->l2p_update);
 	mem = smp_load_acquire(&rb->mem);
@@ -360,7 +360,7 @@ int pblk_rb_update_l2p(struct pblk_rb *rb, unsigned int nr_entries,
 	smp_store_release(&rb->l2p_update, l2p_upd);
 
 out:
-	spin_unlock(&rb->u_lock);
+	spin_unlock(&rb->l2p_lock);
 	return ret;
 }
 
@@ -374,7 +374,7 @@ void pblk_rb_sync_l2p(struct pblk_rb *rb)
 	unsigned long l2p_upd, sync;
 	unsigned int to_update;
 
-	spin_lock(&rb->u_lock);
+	spin_lock(&rb->l2p_lock);
 
 	l2p_upd = smp_load_acquire(&rb->l2p_update);
 	sync = smp_load_acquire(&rb->sync);
@@ -384,7 +384,7 @@ void pblk_rb_sync_l2p(struct pblk_rb *rb)
 	__pblk_rb_update_l2p(rb, &l2p_upd, to_update, to_update, NULL);
 	smp_store_release(&rb->l2p_update, l2p_upd);
 
-	spin_unlock(&rb->u_lock);
+	spin_unlock(&rb->l2p_lock);
 }
 
 /**
@@ -533,7 +533,7 @@ unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct bio *bio,
 	unsigned int i;
 	int ret;
 
-	lockdep_assert_held(&rb->s_lock);
+	lockdep_assert_held(&rb->r_lock);
 
 	mem = smp_load_acquire(&rb->mem);
 	subm = READ_ONCE(rb->subm);
@@ -629,7 +629,7 @@ struct pblk_w_ctx *pblk_rb_w_ctx(struct pblk_rb *rb, unsigned long pos)
 
 unsigned long pblk_rb_sync_init(struct pblk_rb *rb, unsigned long *flags)
 {
-	spin_lock_irqsave(&rb->sy_lock, *flags);
+	spin_lock_irqsave(&rb->s_lock, *flags);
 
 	return rb->sync;
 }
@@ -641,7 +641,7 @@ unsigned long pblk_rb_sync_advance(struct pblk_rb *rb, unsigned int nr_entries)
 	unsigned long sync;
 	unsigned long i;
 
-	lockdep_assert_held(&rb->sy_lock);
+	lockdep_assert_held(&rb->s_lock);
 	sync = READ_ONCE(rb->sync);
 
 	for (i = 0; i < nr_entries; i++) {
@@ -666,9 +666,9 @@ unsigned long pblk_rb_sync_advance(struct pblk_rb *rb, unsigned int nr_entries)
 
 void pblk_rb_sync_end(struct pblk_rb *rb, unsigned long flags)
 {
-	lockdep_assert_held(&rb->sy_lock);
+	lockdep_assert_held(&rb->s_lock);
 
-	spin_unlock_irqrestore(&rb->sy_lock, flags);
+	spin_unlock_irqrestore(&rb->s_lock, flags);
 }
 
 int pblk_rb_sync_point_set(struct pblk_rb *rb, struct bio *bio)
@@ -677,7 +677,7 @@ int pblk_rb_sync_point_set(struct pblk_rb *rb, struct bio *bio)
 	unsigned long mem, subm, sync_point;
 	int ret = NVM_IO_OK;
 
-	spin_lock(&rb->s_lock);
+	spin_lock(&rb->r_lock);
 
 	mem = smp_load_acquire(&rb->mem);
 	sync_point = smp_load_acquire(&rb->sync_point);
@@ -705,7 +705,7 @@ int pblk_rb_sync_point_set(struct pblk_rb *rb, struct bio *bio)
 	smp_store_release(&rb->sync_point, sync_point);
 
 out:
-	spin_unlock(&rb->s_lock);
+	spin_unlock(&rb->r_lock);
 	return ret;
 }
 
@@ -778,9 +778,9 @@ int pblk_rb_tear_down_check(struct pblk_rb *rb)
 	int ret = 0;
 
 	spin_lock(&rb->w_lock);
+	spin_lock(&rb->r_lock);
 	spin_lock(&rb->s_lock);
-	spin_lock(&rb->sy_lock);
-	spin_lock(&rb->u_lock);
+	spin_lock(&rb->l2p_lock);
 
 	if ((rb->mem == rb->subm) && (rb->subm == rb->sync) &&
 				(rb->sync == rb->l2p_update) &&
@@ -795,9 +795,9 @@ int pblk_rb_tear_down_check(struct pblk_rb *rb)
 
 out:
 	spin_unlock(&rb->w_lock);
+	spin_unlock(&rb->r_lock);
 	spin_unlock(&rb->s_lock);
-	spin_unlock(&rb->sy_lock);
-	spin_unlock(&rb->u_lock);
+	spin_unlock(&rb->l2p_lock);
 
 	return ret;
 }

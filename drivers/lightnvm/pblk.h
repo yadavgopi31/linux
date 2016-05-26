@@ -191,9 +191,9 @@ struct pblk_rb {
 	void *data;			/* Data buffer*/
 
 	spinlock_t w_lock;		/* Write lock */
-	spinlock_t s_lock;		/* Submit lock */
-	spinlock_t sy_lock;		/* Sync lock */
-	spinlock_t u_lock;		/* l2p update lock */
+	spinlock_t r_lock;		/* Read lock */
+	spinlock_t s_lock;		/* Sync lock */
+	spinlock_t l2p_lock;		/* l2p update lock */
 
 #if CONFIG_NVM_DEBUG
 	atomic_t inflight_sync_point;	/* Not served REQ_FLUSH | REQ_FUA */
