@@ -208,8 +208,12 @@ void pblk_rb_read_commit(struct pblk_rb *rb, unsigned int nr_entries)
  */
 void pblk_rb_read_rollback(struct pblk_rb *rb)
 {
+	unsigned long subm;
+
 	lockdep_assert_held(&rb->r_lock);
 
+	subm = READ_ONCE(rb->subm);
+	smp_store_release(&rb->subm, subm);
 	spin_unlock(&rb->r_lock);
 }
 
@@ -220,7 +224,7 @@ static void pblk_rb_requeue_entry(struct pblk_rb *rb,
 	struct ppa_addr ppa;
 	unsigned long mem;
 
-	/* Serialized in pblk_rb_write_begin */
+	/* Serialized in pblk_rb_write_init */
 	mem = READ_ONCE(rb->mem);
 
 	/* Maintain original bio, lba and flags */
@@ -429,14 +433,10 @@ out:
 	return ret;
 }
 
-void pblk_rb_write_lock(struct pblk_rb *rb)
+void pblk_rb_write_init(struct pblk_rb *rb)
 {
+	/* Serialize writers */
 	spin_lock(&rb->w_lock);
-}
-
-void pblk_rb_write_unlock(struct pblk_rb *rb)
-{
-	spin_unlock(&rb->w_lock);
 }
 
 unsigned long pblk_rb_write_pos(struct pblk_rb *rb)
@@ -452,12 +452,17 @@ void pblk_rb_write_commit(struct pblk_rb *rb, unsigned int nr_entries)
 
 	mem = READ_ONCE(rb->mem);
 	smp_store_release(&rb->mem, (mem + nr_entries) & (rb->nr_entries - 1));
+	spin_unlock(&rb->w_lock);
 }
 
 void pblk_rb_write_rollback(struct pblk_rb *rb)
 {
+	unsigned long mem;
+
 	lockdep_assert_held(&rb->w_lock);
 
+	mem = READ_ONCE(rb->mem);
+	smp_store_release(&rb->mem, mem);
 	spin_unlock(&rb->w_lock);
 }
 
