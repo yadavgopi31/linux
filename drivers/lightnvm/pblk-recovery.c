@@ -52,7 +52,7 @@ static int pblk_write_recov_to_cache(struct pblk *pblk, struct bio *bio,
 
 	BUG_ON(!bio_has_data(bio) || (nr_rec_secs != bio->bi_vcnt));
 
-	pblk_rb_write_init(&pblk->rwb);
+	pblk_rb_write_lock(&pblk->rwb);
 
 	if (pblk_rb_space(&pblk->rwb) < nr_secs)
 		goto rollback;
@@ -117,10 +117,11 @@ static int pblk_write_recov_to_cache(struct pblk *pblk, struct bio *bio,
 #endif
 
 	pblk_rb_write_commit(&pblk->rwb, valid_secs);
+	pblk_rb_write_unlock(&pblk->rwb);
 	return 1;
 
 rollback:
-	pblk_rb_write_rollback(&pblk->rwb);
+	pblk_rb_write_unlock(&pblk->rwb);
 	return 0;
 }
 

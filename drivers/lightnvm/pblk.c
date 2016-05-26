@@ -1057,15 +1057,19 @@ static int __pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 
 	BUG_ON(!bio_has_data(bio));
 
-	pblk_rb_write_init(&pblk->rwb);
-
-	if (pblk_rb_space(&pblk->rwb) < nr_entries)
-		goto rollback;
-
-	if (pblk_rb_update_l2p(&pblk->rwb, nr_entries, upd_ctx))
-		goto rollback;
+	pblk_rb_write_lock(&pblk->rwb);
+	if ((pblk_rb_space(&pblk->rwb) < nr_entries) ||
+			(pblk_rb_update_l2p(&pblk->rwb, nr_entries, upd_ctx))) {
+		pblk_rb_write_unlock(&pblk->rwb);
+		return 1;
+	}
 
 	pos = pblk_rb_write_pos(&pblk->rwb);
+	/* Update mapping table with the write buffer cachelines and commit
+	 * write transaction. This enables atomic rollback.
+	 */
+	pblk_rb_write_commit(&pblk->rwb, nr_entries);
+	pblk_rb_write_unlock(&pblk->rwb);
 
 	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA)) {
 		b = bio;
@@ -1083,8 +1087,8 @@ static int __pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 		ppa_set_empty(&w_ctx.ppa.ppa);
 
 		data = bio_data(bio);
-		if (pblk_rb_write_entry(&pblk->rwb, data, w_ctx, pos + i))
-			goto rollback;
+
+		pblk_rb_write_entry(&pblk->rwb, data, w_ctx, pos + i);
 
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 	}
@@ -1095,14 +1099,6 @@ static int __pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 		pblk_update_map(pblk, laddr + i, NULL, ppa);
 	}
 
-	/* Update mapping table with the write buffer cachelines and commit
-	 * write transaction. This enables atomic rollback.
-	 */
-	pblk_rb_write_commit(&pblk->rwb, nr_entries);
-	return 1;
-
-rollback:
-	pblk_rb_write_rollback(&pblk->rwb);
 	return 0;
 }
 
@@ -1112,11 +1108,13 @@ static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 	int ret;
 	struct pblk_l2p_upd_ctx upd_ctx;
 
-	if (pblk_lock_rq(pblk, bio, &upd_ctx))
-		return 0;
+	ret = pblk_lock_rq(pblk, bio, &upd_ctx);
+	if (ret)
+		return ret;
 
 	ret = __pblk_write_to_cache(pblk, bio, flags, nr_entries,
 							&upd_ctx, ret_val);
+
 	pblk_unlock_rq(pblk, bio, &upd_ctx, PBLK_UNLOCK_ADDR_NORM);
 
 	return ret;
@@ -1138,7 +1136,7 @@ static int pblk_buffer_write(struct pblk *pblk, struct bio *bio,
 		ret = NVM_IO_OK;
 	}
 
-	if (!pblk_write_to_cache(pblk, bio, flags, nr_secs, &ret)) {
+	if (pblk_write_to_cache(pblk, bio, flags, nr_secs, &ret)) {
 		pr_err_ratelimited("REQUEUE WRITES\n");
 		return NVM_IO_REQUEUE;
 	}
