@@ -299,9 +299,6 @@ try:
 				pblk_rb_update_map(pblk, w_ctx);
 				goto next;
 			}
-			pr_err_ratelimited("RETRY:lba:%lu blk:%lu\n",
-					w_ctx->lba,
-					rblk->parent->id);
 			goto try;
 		}
 

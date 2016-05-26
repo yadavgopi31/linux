@@ -1138,10 +1138,8 @@ static int pblk_buffer_write(struct pblk *pblk, struct bio *bio,
 		ret = NVM_IO_OK;
 	}
 
-	if (!pblk_write_to_cache(pblk, bio, flags, nr_secs, &ret)) {
-		pr_err_ratelimited("REQUEUE WRITES\n");
+	if (!pblk_write_to_cache(pblk, bio, flags, nr_secs, &ret))
 		return NVM_IO_REQUEUE;
-	}
 
 #ifdef CONFIG_NVM_DEBUG
 	atomic_add(nr_secs, &pblk->inflight_writes);
@@ -1554,11 +1552,8 @@ static int pblk_submit_read(struct pblk *pblk, struct bio *bio,
 	memset(rqd, 0, pblk_r_rq_size);
 	r_ctx = nvm_rq_to_pdu(rqd);
 
-	if (pblk_lock_rq(pblk, bio, &r_ctx->upd_ctx)) {
-		pr_err_ratelimited("REQUEUE READS,lba:%lu,n:%d\n",
-			pblk_get_laddr(bio), pblk_get_pages(bio));
+	if (pblk_lock_rq(pblk, bio, &r_ctx->upd_ctx))
 		return NVM_IO_REQUEUE;
-	}
 
 	ret = __pblk_submit_read(pblk, bio, rqd, flags);
 	if (ret) {

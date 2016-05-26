@@ -357,9 +357,6 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 	kref_init(&ref_buf->ref);
 	ref_buf->data = data;
 
-	printk(KERN_CRIT "RECOV:blk:%lu,off:%d\n",
-				rblk->parent->id, off);
-
 	read_left = nr_entries;
 	do {
 		secs_to_rec = pblk_calc_secs_to_sync(pblk, read_left, 0);
@@ -390,7 +387,6 @@ lock_retry:
 					continue;
 				}
 				schedule();
-				pr_err_ratelimited("UPS:lba:%llu\n", lba);
 				goto lock_retry;
 			}
 
