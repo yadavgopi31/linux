@@ -65,7 +65,7 @@ int pblk_rb_init(struct pblk_rb *rb, struct pblk_rb_entry *rb_entry_base,
 		entry->data = rb->data + (i * rb->seg_size);
 	}
 
-#if CONFIG_NVM_DEBUG
+#ifdef CONFIG_NVM_DEBUG
 	atomic_set(&rb->inflight_sync_point, 0);
 #endif
 	return 0;
@@ -276,7 +276,7 @@ static int __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned long *l2p_upd,
 		upd_ctx = &w_ctx->upd_ctx;
 		rblk = w_ctx->ppa.rblk;
 
-#if CONFIG_NVM_DEBUG
+#ifdef CONFIG_NVM_DEBUG
 		/* Check wrap up, which causes updating cachelines */
 		BUG_ON(!rblk);
 #endif
@@ -568,7 +568,7 @@ unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct bio *bio,
 
 		if (entry->w_ctx.bio != NULL) {
 			*sync_point = subm;
-#if CONFIG_NVM_DEBUG
+#ifdef CONFIG_NVM_DEBUG
 			atomic_dec(&rb->inflight_sync_point);
 #endif
 		}
@@ -683,7 +683,7 @@ int pblk_rb_sync_point_set(struct pblk_rb *rb, struct bio *bio)
 	sync_point = smp_load_acquire(&rb->sync_point);
 	subm = READ_ONCE(rb->subm);
 
-#if CONFIG_NVM_DEBUG
+#ifdef CONFIG_NVM_DEBUG
 	atomic_inc(&rb->inflight_sync_point);
 #endif
 

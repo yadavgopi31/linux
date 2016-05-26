@@ -195,7 +195,7 @@ struct pblk_rb {
 	spinlock_t s_lock;		/* Sync lock */
 	spinlock_t l2p_lock;		/* l2p update lock */
 
-#if CONFIG_NVM_DEBUG
+#ifdef CONFIG_NVM_DEBUG
 	atomic_t inflight_sync_point;	/* Not served REQ_FLUSH | REQ_FUA */
 #endif
 };
