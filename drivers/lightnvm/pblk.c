@@ -881,11 +881,13 @@ try:
  *  pblk_end_w_fail is in charge of identifying the bad writes and mark the
  *  blocks associated to the write ppas as bad. JAVIER:: COMPLETE THIS.
  *
+ *  This function assumes that ppas in rqd are in generic mode. This is,
+ *  nvm_addr_to_generic_mode(dev, rqd) has been called.
+ *
  *  TODO: Depending on the type of memory, try write retry
  */
 static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 {
-	struct nvm_dev *dev = pblk->dev;
 	void *comp_bits = &rqd->ppa_status;
 	struct pblk_ctx *ctx = pblk_set_ctx(pblk, rqd);
 	struct pblk_rb_entry *entry;
@@ -896,8 +898,6 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 	int nr_ppas = rqd->nr_ppas;
 	int bit, mod;
 	int ret;
-
-	nvm_addr_to_generic_mode(dev, rqd);
 
 	/* The last page of a block contains recovery metadata, if a block
 	 * becomes bad when writing this page, there is no need to recover what
