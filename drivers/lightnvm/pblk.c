@@ -2675,6 +2675,8 @@ static void pblk_print_debug(void *private)
 	struct pblk *pblk = private;
 	struct pblk_lun *rlun;
 	struct pblk_block *rblk;
+	struct pblk_ctx *c;
+	struct pblk_compl_ctx *c_ctx;
 	unsigned int i;
 
 	pr_info("pblk: %u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
@@ -2723,6 +2725,15 @@ static void pblk_print_debug(void *private)
 			spin_unlock(&rblk->lock);
 		}
 		spin_unlock(&rlun->lock_lists);
+	}
+
+	/* Print completion queue */
+	list_for_each_entry(c, &pblk->compl_list, list) {
+		c_ctx = c->c_ctx;
+		pr_info("pblk:compl_list:\t%u\t%u\t%u\n",
+			c_ctx->sentry,
+			c_ctx->nr_valid,
+			c_ctx->nr_padded);
 	}
 }
 #else
