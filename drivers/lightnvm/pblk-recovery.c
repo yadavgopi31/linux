@@ -211,7 +211,7 @@ static int pblk_submit_recov_read(struct pblk *pblk, struct bio *bio,
 {
 	struct pblk_r_ctx *r_ctx = nvm_rq_to_pdu(rqd);
 	unsigned long read_bitmap; /* Max 64 ppas per request */
-	unsigned int valid_secs = 0;
+	unsigned int valid_secs = 1;
 	int ret;
 
 	bitmap_zero(&read_bitmap, nr_secs);
