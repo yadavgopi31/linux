@@ -756,6 +756,52 @@ out:
 	return ret;
 }
 
+static void pblk_bio_free_pages(struct pblk *pblk, struct bio *bio, int off,
+				int nr_pages)
+{
+		struct bio_vec bv;
+		int i;
+
+		WARN_ON(off + nr_pages != bio->bi_vcnt);
+
+		bio_advance(bio, off * PBLK_EXPOSED_PAGE_SIZE);
+		for (i = off; i < nr_pages + off; i++) {
+			bv = bio->bi_io_vec[i];
+			mempool_free(&bv.bv_page, pblk->page_pool);
+		}
+}
+
+static int pblk_bio_add_pages(struct pblk *pblk, struct bio *bio, gfp_t flags,
+			      int nr_pages)
+{
+	struct request_queue *q = pblk->dev->q;
+	struct page *page;
+	int ret;
+	int i;
+
+	for (i = 0; i < nr_pages; i++) {
+		page = mempool_alloc(pblk->page_pool, flags);
+		if (!page) {
+			pr_err("pblk: could not alloc read page\n");
+			goto err;
+		}
+
+		ret = bio_add_pc_page(q, bio, page,
+						PBLK_EXPOSED_PAGE_SIZE, 0);
+		if (ret != PBLK_EXPOSED_PAGE_SIZE) {
+			pr_err("pblk: could not add page to bio\n");
+			mempool_free(page, pblk->page_pool);
+			goto err;
+		}
+	}
+
+	return 0;
+
+err:
+	pblk_bio_free_pages(pblk, bio, 0, i - 1);
+	return -1;
+}
+
 static void pblk_sync_buffer(struct pblk *pblk, struct pblk_addr p, int flags)
 {
 	struct pblk_block *rblk = p.rblk;
@@ -1305,15 +1351,13 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 			       unsigned long *read_bitmap, struct nvm_rq *rqd,
 			       uint8_t nr_secs)
 {
-	struct request_queue *q = pblk->dev->q;
 	struct pblk_r_ctx *r_ctx = nvm_rq_to_pdu(rqd);
 	struct bio *new_bio;
-	struct page *page;
 	struct bio_vec src_bv, dst_bv;
 	void *src_p, *dst_p;
 	int nr_holes = nr_secs - bitmap_weight(read_bitmap, nr_secs);
 	int hole;
-	int i = 0;
+	int i;
 	int ret;
 	uint16_t flags;
 	DECLARE_COMPLETION_ONSTACK(wait);
@@ -1327,21 +1371,10 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 		return NVM_IO_ERR;
 	}
 
-	for (i = 0; i < nr_holes; i++) {
-		page = mempool_alloc(pblk->page_pool, GFP_KERNEL);
-		if (!page) {
-			bio_put(new_bio);
-			pr_err("pblk: could not alloc read page\n");
-			goto err;
-		}
-
-		ret = bio_add_pc_page(q, new_bio, page,
-						PBLK_EXPOSED_PAGE_SIZE, 0);
-		if (ret != PBLK_EXPOSED_PAGE_SIZE) {
-			pr_err("pblk: could not add page to bio\n");
-			mempool_free(page, pblk->page_pool);
-			goto err;
-		}
+	if (pblk_bio_add_pages(pblk, new_bio, GFP_KERNEL, nr_holes)) {
+		printk(KERN_CRIT "WTF\n");
+		bio_put(bio);
+		goto err;
 	}
 
 	if (nr_holes != new_bio->bi_vcnt) {
@@ -1407,10 +1440,7 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 
 err:
 	/* Free allocated pages in new bio */
-	for (i = 0; i < new_bio->bi_vcnt; i++) {
-		src_bv = new_bio->bi_io_vec[i];
-		mempool_free(&src_bv.bv_page, pblk->page_pool);
-	}
+	pblk_bio_free_pages(pblk, bio, 0, new_bio->bi_vcnt);
 	bio_endio(new_bio);
 	return NVM_IO_ERR;
 }
@@ -1799,6 +1829,7 @@ static void pblk_submit_write(struct work_struct *work)
 	struct bio *bio;
 	struct nvm_rq *rqd;
 	struct pblk_ctx *ctx;
+	struct pblk_compl_ctx *c_ctx;
 	unsigned int pgs_read;
 	unsigned int secs_avail, secs_to_sync, secs_to_flush = 0;
 	unsigned long sync_point;
@@ -1811,6 +1842,7 @@ static void pblk_submit_write(struct work_struct *work)
 	}
 	memset(rqd, 0, pblk_w_rq_size);
 	ctx = pblk_set_ctx(pblk, rqd);
+	c_ctx = ctx->c_ctx;
 
 	bio = bio_alloc(GFP_KERNEL, pblk->max_write_pgs);
 	if (!bio) {
@@ -1843,6 +1875,10 @@ static void pblk_submit_write(struct work_struct *work)
 
 	pblk_rb_read_commit(&pblk->rwb, pgs_read);
 
+	if (c_ctx->nr_padded)
+		if (pblk_bio_add_pages(pblk, bio, GFP_KERNEL, c_ctx->nr_padded))
+			goto fail_sync;
+
 	bio->bi_iter.bi_sector = 0; /* artificial bio */
 	bio->bi_rw = WRITE;
 	rqd->bio = bio;
@@ -1851,13 +1887,13 @@ static void pblk_submit_write(struct work_struct *work)
 	err = pblk_setup_w_rq(pblk, rqd, ctx);
 	if (err) {
 		pr_err("pblk: could not setup write request\n");
-		goto fail_sync;
+		goto fail_free_bio;
 	}
 
 	err = nvm_submit_io(dev, rqd);
 	if (err) {
 		pr_err("pblk: I/O submission failed: %d\n", err);
-		goto fail_sync;
+		goto fail_free_bio;
 	}
 
 #ifdef CONFIG_NVM_DEBUG
@@ -1866,6 +1902,9 @@ static void pblk_submit_write(struct work_struct *work)
 
 	return;
 
+fail_free_bio:
+	if (c_ctx->nr_padded)
+		pblk_bio_free_pages(pblk, bio, secs_to_sync, c_ctx->nr_padded);
 fail_sync:
 	/* Fail is probably caused by a locked lba - kick the queue to avoid a
 	 * deadlock in the case that no new I/Os are coming in.
