@@ -154,15 +154,11 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 
 		lba = lba_list[i];
 
-		if (lba == ADDR_EMPTY) {
-			WARN_ON(test_and_set_bit(i, read_bitmap));
+		if (lba == ADDR_EMPTY)
 			continue;
-		}
 
-		if (ppa_empty(*p)) {
-			WARN_ON(test_and_set_bit(*valid_secs, read_bitmap));
+		if (ppa_empty(*p))
 			continue;
-		}
 
 		BUG_ON(!(lba >= 0 && lba < pblk->nr_secs));
 
