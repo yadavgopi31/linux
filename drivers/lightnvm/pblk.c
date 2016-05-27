@@ -1357,6 +1357,8 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 	struct bio_vec src_bv, dst_bv;
 	void *src_p, *dst_p;
 	int nr_holes = nr_secs - bitmap_weight(read_bitmap, nr_secs);
+	void *ppa_ptr;
+	dma_addr_t dma_ppa_list;
 	int hole;
 	int i;
 	int ret;
@@ -1392,15 +1394,31 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 	rqd->bio = new_bio;
 	rqd->nr_ppas = nr_holes;
 
+	if (unlikely(nr_secs > 1 && nr_holes == 1)) {
+		ppa_ptr = rqd->ppa_list;
+		dma_ppa_list = rqd->dma_ppa_list;
+		rqd->ppa_addr = rqd->ppa_list[0];
+	}
+
 #ifdef CONFIG_NVM_DEBUG
 	ppa_list = (rqd->nr_ppas > 1) ? rqd->ppa_list : &rqd->ppa_addr;
-	if (nvm_boundary_checks(pblk->dev, ppa_list, rqd->nr_ppas))
+	if (nvm_boundary_checks(pblk->dev, ppa_list, rqd->nr_ppas)) {
+		printk(KERN_CRIT "nppas:%d, nr_secs:%d, nr_holes:%d\n",
+				rqd->nr_ppas,
+				nr_secs,
+				nr_holes);
 		BUG_ON(1);
+	}
 		/* WARN_ON(1); */
 #endif
 
 	ret = pblk_submit_read_io(pblk, new_bio, rqd, r_ctx->flags);
 	wait_for_completion_io(&wait);
+
+	if (unlikely(nr_secs > 1 && nr_holes == 1)) {
+		rqd->ppa_list = ppa_ptr;
+		rqd->dma_ppa_list = dma_ppa_list;
+	}
 
 	if (ret || new_bio->bi_error)
 		goto err;
