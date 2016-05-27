@@ -1373,7 +1373,6 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 	}
 
 	if (pblk_bio_add_pages(pblk, new_bio, GFP_KERNEL, nr_holes)) {
-		printk(KERN_CRIT "WTF\n");
 		bio_put(bio);
 		goto err;
 	}
