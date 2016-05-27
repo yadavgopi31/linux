@@ -254,6 +254,10 @@ static int pblk_submit_recov_read(struct pblk *pblk, struct bio *bio,
 	rqd->nr_ppas = valid_secs;
 	r_ctx->flags = flags;
 
+#ifdef CONFIG_NVM_DEBUG
+	BUG_ON(nr_rec_secs != valid_secs);
+#endif
+
 	if (bitmap_full(&read_bitmap, valid_secs)) {
 		bio_endio(bio);
 		pblk_end_io(rqd);
@@ -261,8 +265,6 @@ static int pblk_submit_recov_read(struct pblk *pblk, struct bio *bio,
 	} else if (bitmap_empty(&read_bitmap, valid_secs)) {
 #ifdef CONFIG_NVM_DEBUG
 		struct ppa_addr *ppa_list;
-
-		BUG_ON(nr_rec_secs != valid_secs);
 
 		ppa_list = (rqd->nr_ppas > 1) ? rqd->ppa_list : &rqd->ppa_addr;
 		if (nvm_boundary_checks(pblk->dev, ppa_list, rqd->nr_ppas))
