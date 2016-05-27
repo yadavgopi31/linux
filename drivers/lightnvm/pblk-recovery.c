@@ -329,8 +329,10 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 	nr_entries = bitmap_weight(rblk->pages, pblk->nr_blk_dsecs);
 
 	/* Recovery for this block already in progress */
-	if (nr_entries == 0)
+	if (nr_entries == 0) {
+		spin_unlock(&rblk->lock);
 		goto out;
+	}
 
 	/* Clear mapped pages as they are set for recovery */
 	off = find_first_bit(rblk->pages, pblk->nr_blk_dsecs);
@@ -484,7 +486,6 @@ fail_free_krefbuf:
 fail_free_data:
 	kfree(data);
 out:
-	spin_unlock(&rblk->lock);
 	mempool_free(gcb, pblk->gcb_pool);
 }
 
