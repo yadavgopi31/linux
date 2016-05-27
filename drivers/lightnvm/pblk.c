@@ -1156,12 +1156,11 @@ static int pblk_buffer_write(struct pblk *pblk, struct bio *bio,
 		atomic_inc(&pblk->nr_flush);
 #endif
 		if (!bio_has_data(bio)) {
-			ret = pblk_rb_sync_point_set(&pblk->rwb, bio);
+			if (pblk_rb_sync_point_set(&pblk->rwb, bio))
+				ret = NVM_IO_OK;
 			pblk_write_kick(pblk);
 			goto out;
 		}
-
-		ret = NVM_IO_OK;
 	}
 
 	if (!pblk_write_to_cache(pblk, bio, flags, nr_secs, &ret))

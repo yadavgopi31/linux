@@ -658,7 +658,7 @@ int pblk_rb_sync_point_set(struct pblk_rb *rb, struct bio *bio)
 {
 	struct pblk_rb_entry *entry;
 	unsigned long mem, subm, sync_point;
-	int ret = NVM_IO_OK;
+	int ret = 0;
 
 	spin_lock(&rb->r_lock);
 
@@ -670,10 +670,8 @@ int pblk_rb_sync_point_set(struct pblk_rb *rb, struct bio *bio)
 	atomic_inc(&rb->inflight_sync_point);
 #endif
 
-	if (mem == subm) {
-		ret = NVM_IO_DONE;
+	if (mem == subm)
 		goto out;
-	}
 
 	sync_point = (mem == 0) ? (rb->nr_entries - 1) : (mem - 1);
 	entry = &rb->entries[sync_point];
@@ -686,6 +684,8 @@ int pblk_rb_sync_point_set(struct pblk_rb *rb, struct bio *bio)
 
 	entry->w_ctx.bio = bio;
 	smp_store_release(&rb->sync_point, sync_point);
+
+	ret = 1;
 
 out:
 	spin_unlock(&rb->r_lock);
