@@ -848,8 +848,10 @@ static unsigned long pblk_end_w_bio(struct pblk *pblk, struct nvm_rq *rqd,
 		w_ctx = pblk_rb_w_ctx(&pblk->rwb, c_ctx->sentry + i);
 		pblk_sync_buffer(pblk, w_ctx->ppa, w_ctx->flags);
 		original_bio = w_ctx->bio;
-		if (original_bio)
+		if (original_bio) {
 			bio_endio(original_bio);
+			w_ctx->bio = NULL;
+		}
 	}
 
 #ifdef CONFIG_NVM_DEBUG
