@@ -1021,14 +1021,6 @@ static void pblk_end_io_write(struct pblk *pblk, struct nvm_rq *rqd)
 	if (ctx->flags & PBLK_IOTYPE_CLOSE_BLK)
 		return pblk_end_close_blk_bio(pblk, rqd, 1);
 
-#ifdef CONFIG_NVM_DEBUG
-	if (!(ctx->flags & PBLK_IOTYPE_REC)) {
-		struct pblk_compl_ctx *c_ctx;
-		c_ctx = ctx->c_ctx;
-		BUG_ON(rqd->nr_ppas != (c_ctx->nr_valid + c_ctx->nr_padded));
-	}
-#endif
-
 	if (ctx->flags & PBLK_IOTYPE_PAD)
 		return pblk_end_w_pad(pblk, rqd, ctx);
 

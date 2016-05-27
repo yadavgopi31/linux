@@ -536,7 +536,6 @@ static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
 	}
 
 	rqd->ppa_status = (u64)0;
-	ctx->flags = PBLK_IOTYPE_REC;
 
 #ifdef CONFIG_NVM_DEBUG
 	if (nvm_boundary_checks(dev, rqd->ppa_list, rqd->nr_ppas))
