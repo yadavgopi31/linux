@@ -291,8 +291,16 @@ int nvme_sg_get_version_num(int __user *ip);
 
 #ifdef CONFIG_NVM
 int nvme_nvm_ns_supported(struct nvme_ns *ns, struct nvme_id_ns *id);
-int nvme_nvm_register(struct request_queue *q, char *disk_name);
-void nvme_nvm_unregister(struct request_queue *q, char *disk_name);
+int nvme_nvm_register(struct nvme_ns *ns, char *disk_name, int node);
+void nvme_nvm_unregister(struct nvme_ns *ns);
+
+static inline struct nvme_ns *nvme_get_ns_from_dev(struct device *dev)
+{
+	if (dev->type->devnode)
+		return dev_to_disk(dev)->private_data;
+
+	return (container_of(dev, struct nvm_dev, dev))->private_data;
+}
 #else
 static inline int nvme_nvm_register(struct request_queue *q, char *disk_name)
 {
@@ -304,6 +312,10 @@ static inline void nvme_nvm_unregister(struct request_queue *q, char *disk_name)
 static inline int nvme_nvm_ns_supported(struct nvme_ns *ns, struct nvme_id_ns *id)
 {
 	return 0;
+}
+static inline struct nvme_ns *nvme_get_ns_from_dev(struct device *dev)
+{
+	return dev_to_disk(dev)->private_data;
 }
 #endif /* CONFIG_NVM */
 
