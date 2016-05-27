@@ -592,14 +592,27 @@ static struct nvm_dev_ops nvme_nvm_dev_ops = {
 	.max_phys_sect		= 64,
 };
 
-int nvme_nvm_register(struct request_queue *q, char *disk_name)
+int nvme_nvm_register(struct nvme_ns *ns, char *disk_name, int node)
 {
-	return nvm_register(q, disk_name, &nvme_nvm_dev_ops);
+	struct request_queue *q = ns->queue;
+	struct nvm_dev *dev;
+
+	dev = nvm_alloc_dev(node);
+	if (!dev)
+		return -ENOMEM;
+
+	dev->q = q;
+	memcpy(dev->name, disk_name, DISK_NAME_LEN);
+	dev->ops = &nvme_nvm_dev_ops;
+	ns->ndev = dev;
+
+	return nvm_register(dev);
 }
 
-void nvme_nvm_unregister(struct request_queue *q, char *disk_name)
+void nvme_nvm_unregister(struct nvme_ns *ns)
 {
-	nvm_unregister(disk_name);
+	nvm_unregister(ns->ndev);
+	kfree(ns->ndev);
 }
 
 /* move to shared place when used in multiple places. */
