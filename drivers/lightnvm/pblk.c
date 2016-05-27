@@ -1036,9 +1036,9 @@ void pblk_end_io(struct nvm_rq *rqd)
  *
  * return: 1 if bio has been written to buffer, 0 otherwise.
  */
-static int __pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
+static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 				 unsigned long flags, unsigned int nr_entries,
-				 struct pblk_l2p_upd_ctx *upd_ctx, int *ret_val)
+				 int *ret_val)
 {
 	sector_t laddr = pblk_get_laddr(bio);
 	struct pblk_w_ctx w_ctx;
@@ -1055,7 +1055,7 @@ static int __pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 	if (pblk_rb_space(&pblk->rwb) < nr_entries)
 		goto rollback;
 
-	if (pblk_rb_update_l2p(&pblk->rwb, nr_entries, upd_ctx))
+	if (pblk_rb_update_l2p(&pblk->rwb, nr_entries))
 		goto rollback;
 
 	pos = pblk_rb_write_pos(&pblk->rwb);
@@ -1097,13 +1097,6 @@ static int __pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 rollback:
 	pblk_rb_write_rollback(&pblk->rwb);
 	return 0;
-}
-
-static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
-		unsigned long flags, unsigned int nr_entries, int *ret_val)
-{
-	return __pblk_write_to_cache(pblk, bio, flags, nr_entries,
-							NULL, ret_val);
 }
 
 static int pblk_buffer_write(struct pblk *pblk, struct bio *bio,
@@ -1174,7 +1167,7 @@ static int pblk_read_ppalist_rq(struct pblk *pblk, struct bio *bio,
 	sector_t laddr = pblk_get_laddr(bio);
 	int advanced_bio = 0;
 	int i, j = 0;
-	struct ppa_addr ppas[64];
+	struct ppa_addr ppas[PBLK_MAX_REQ_ADDRS];
 
 	BUG_ON(!(laddr >= 0 && laddr + nr_secs < pblk->nr_secs));
 
@@ -2151,6 +2144,11 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 	pblk->min_write_pgs = dev->sec_per_pl * (dev->sec_size / PAGE_SIZE);
 	/* assume max_phys_sect % dev->min_write_pgs == 0 */
 	pblk->max_write_pgs = dev->ops->max_phys_sect;
+
+	if (pblk->max_write_pgs > PBLK_MAX_REQ_ADDRS) {
+		pr_err("pblk: cannot support device max_phys_sect\n");
+		return -EINVAL;
+	}
 
 	div_u64_rem(dev->sec_per_blk, pblk->min_write_pgs, &mod);
 	if (mod) {

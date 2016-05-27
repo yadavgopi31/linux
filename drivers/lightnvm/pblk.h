@@ -36,6 +36,7 @@
 
 #define PBLK_SECTOR (512)
 #define PBLK_EXPOSED_PAGE_SIZE (4096)
+#define PBLK_MAX_REQ_ADDRS (64)
 
 #define NR_PHY_IN_LOG (PBLK_EXPOSED_PAGE_SIZE / PBLK_SECTOR)
 
@@ -90,12 +91,6 @@ struct pblk_kref_buf {
 	void *data;
 };
 
-struct pblk_l2p_upd_ctx {
-	struct list_head list;
-	sector_t l_start;
-	sector_t l_end;
-};
-
 /* Logical to physical mapping */
 struct pblk_addr {
 	struct ppa_addr ppa;		/* cacheline OR physical address */
@@ -121,7 +116,6 @@ struct pblk_ctx {
 
 /* Read context */
 struct pblk_r_ctx {
-	struct pblk_l2p_upd_ctx upd_ctx;/* Update context for l2p table */
 	int flags;			/* Read context flags */
 };
 
@@ -139,7 +133,6 @@ struct pblk_w_ctx {
 					 * REQ_FUA, REQ_FLUSH case
 					 */
 	void *priv;			/* Private pointer */
-	struct pblk_l2p_upd_ctx upd_ctx;/* Update context for l2p table */
 	sector_t lba;			/* Logic addr. associated with entry */
 	struct pblk_addr ppa;		/* Physic addr. associated with entry */
 	int flags;			/* Write context flags */
@@ -360,8 +353,7 @@ struct pblk_w_ctx *pblk_rb_w_ctx(struct pblk_rb *rb, unsigned long pos);
 void pblk_rb_write_commit(struct pblk_rb *rb, unsigned int nr_entries);
 void pblk_rb_write_rollback(struct pblk_rb *rb);
 
-int pblk_rb_update_l2p(struct pblk_rb *rb, unsigned int nr_entries,
-		       struct pblk_l2p_upd_ctx *lock_list);
+int pblk_rb_update_l2p(struct pblk_rb *rb, unsigned int nr_entries);
 void pblk_rb_sync_l2p(struct pblk_rb *rb);
 
 unsigned long pblk_rb_count_init(struct pblk_rb *rb);
@@ -568,7 +560,6 @@ static void pblk_page_invalidate(struct pblk *pblk, struct pblk_addr *a)
 	rblk->nr_invalid_pages++;
 }
 
-/* Lock to the address being updated must be taken */
 static inline void pblk_update_map(struct pblk *pblk, sector_t laddr,
 				struct pblk_block *rblk, struct ppa_addr ppa)
 {

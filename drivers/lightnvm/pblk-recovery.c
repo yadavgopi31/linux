@@ -57,7 +57,7 @@ static int pblk_write_recov_to_cache(struct pblk *pblk, struct bio *bio,
 	if (pblk_rb_space(&pblk->rwb) < nr_secs)
 		goto rollback;
 
-	if (pblk_rb_update_l2p(&pblk->rwb, nr_secs, NULL))
+	if (pblk_rb_update_l2p(&pblk->rwb, nr_secs))
 		goto rollback;
 
 	pos = pblk_rb_write_pos(&pblk->rwb);
@@ -134,7 +134,7 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 	sector_t lba;
 	int advanced_bio = 0;
 	int i, j = 0;
-	struct ppa_addr ppas[64];
+	struct ppa_addr ppas[PBLK_MAX_REQ_ADDRS];
 
 	(*valid_secs) = 0;
 
@@ -307,7 +307,6 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 	struct request_queue *q = dev->q;
 	struct pblk_block *rblk = gcb->rblk;
 	struct pblk_blk_rec_lpg *rlpg = rblk->rlpg;
-	struct pblk_l2p_upd_ctx *upd_ctx;
 	struct nvm_rq *rqd;
 	struct pblk_addr *gp;
 	struct bio *bio;
@@ -339,17 +338,10 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 	spin_unlock(&rblk->lock);
 
 	alloc_entries = (nr_entries > max) ? max : nr_entries;
-	upd_ctx = kzalloc(alloc_entries * sizeof(struct pblk_l2p_upd_ctx),
-								GFP_KERNEL);
-	if (!upd_ctx) {
-		pr_err("pblk: could not allocate update context\n");
-		goto out;
-	}
-
 	data = kmalloc(alloc_entries * dev->sec_size, GFP_KERNEL);
 	if (!data) {
 		pr_err("pblk: could not allocate recovery buffer\n");
-		goto fail_free_ctx;
+		goto out;
 	}
 
 	ref_buf = kmalloc(sizeof(struct pblk_kref_buf), GFP_KERNEL);
@@ -365,14 +357,12 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 		secs_to_rec = pblk_calc_secs_to_sync(pblk, read_left, 0);
 		ignored = 0;
 
-		/* Lock addresses for current recovery I/O */
+		/* Discard invalid addresses for current recovery I/O */
 		for (i = 0; i < secs_to_rec; i++) {
 			lba = lba_list[i + off];
 
 			/* Omit padded entries on recovery */
 			if (lba == ADDR_EMPTY) {
-				upd_ctx[i].l_start = ADDR_EMPTY;
-				upd_ctx[i].l_end = ADDR_EMPTY;
 				ignored++;
 				continue;
 			}
@@ -389,10 +379,9 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 			spin_lock(&pblk->trans_lock);
 			gp = &pblk->trans_map[lba];
 			spin_unlock(&pblk->trans_lock);
+
 			if (nvm_addr_in_cache(gp->ppa) ||
 			   (gp->rblk->parent->id != rblk->parent->id)) {
-				upd_ctx[i].l_start = ADDR_EMPTY;
-				upd_ctx[i].l_end = ADDR_EMPTY;
 				lba_list[i + off] = ADDR_EMPTY;
 				ignored++;
 				continue;
@@ -472,7 +461,6 @@ next:
 	} while (read_left > 0);
 
 	kref_put(&ref_buf->ref, pblk_free_ref_mem);
-	kfree(upd_ctx);
 
 	spin_lock(&rblk->rlun->lock_lists);
 	list_move_tail(&rblk->list, &rblk->rlun->bb_list);
@@ -492,16 +480,9 @@ next:
 fail_free_rqd:
 	pblk_free_recov_rqd(pblk, rqd);
 fail_free_krefbuf:
-	for (i = 0; i < secs_to_rec; i++) {
-		if (upd_ctx[i].l_start == ADDR_EMPTY)
-			continue;
-	}
-
 	kfree(ref_buf);
 fail_free_data:
 	kfree(data);
-fail_free_ctx:
-	kfree(upd_ctx);
 out:
 	spin_unlock(&rblk->lock);
 	mempool_free(gcb, pblk->gcb_pool);

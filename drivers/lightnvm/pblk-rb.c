@@ -255,12 +255,10 @@ static void pblk_rb_update_map(struct pblk *pblk, struct pblk_w_ctx *w_ctx)
 }
 
 static int __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned long *l2p_upd,
-				 unsigned int to_update, unsigned long limit,
-				 struct pblk_l2p_upd_ctx *lock_list)
+				 unsigned int to_update, unsigned long limit)
 {
 	struct pblk *pblk = container_of(rb, struct pblk, rwb);
 	struct pblk_rb_entry *entry;
-	struct pblk_l2p_upd_ctx *upd_ctx;
 	struct pblk_w_ctx *w_ctx;
 	struct pblk_block *rblk;
 	unsigned long l2p_upd_l = *l2p_upd;
@@ -278,7 +276,6 @@ static int __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned long *l2p_upd,
 
 		entry = &rb->entries[l2p_upd_l];
 		w_ctx = &entry->w_ctx;
-		upd_ctx = &w_ctx->upd_ctx;
 		rblk = w_ctx->ppa.rblk;
 
 #ifdef CONFIG_NVM_DEBUG
@@ -317,8 +314,7 @@ out:
  * point to the physical address instead of to the cacheline in the write buffer
  * from this moment on.
  */
-int pblk_rb_update_l2p(struct pblk_rb *rb, unsigned int nr_entries,
-		       struct pblk_l2p_upd_ctx *lock_list)
+int pblk_rb_update_l2p(struct pblk_rb *rb, unsigned int nr_entries)
 {
 	unsigned long count;
 	unsigned long l2p_upd, mem, sync;
@@ -340,7 +336,7 @@ int pblk_rb_update_l2p(struct pblk_rb *rb, unsigned int nr_entries,
 		goto out;
 	}
 
-	ret = __pblk_rb_update_l2p(rb, &l2p_upd, nr_entries, count, lock_list);
+	ret = __pblk_rb_update_l2p(rb, &l2p_upd, nr_entries, count);
 	smp_store_release(&rb->l2p_update, l2p_upd);
 
 out:
@@ -365,7 +361,7 @@ void pblk_rb_sync_l2p(struct pblk_rb *rb)
 
 	to_update = pblk_rb_ring_count(sync, l2p_upd, rb->nr_entries);
 
-	__pblk_rb_update_l2p(rb, &l2p_upd, to_update, to_update, NULL);
+	__pblk_rb_update_l2p(rb, &l2p_upd, to_update, to_update);
 	smp_store_release(&rb->l2p_update, l2p_upd);
 
 	spin_unlock(&rb->l2p_lock);
