@@ -226,7 +226,7 @@ static int pblk_submit_recov_read(struct pblk *pblk, struct bio *bio,
 	if (nr_rec_secs != bio->bi_vcnt)
 		return NVM_IO_ERR;
 
-	if (nr_secs > 1) {
+	if (nr_rec_secs > 1) {
 		rqd->ppa_list = nvm_dev_dma_alloc(pblk->dev, GFP_KERNEL,
 						&rqd->dma_ppa_list);
 		if (!rqd->ppa_list) {
@@ -291,7 +291,7 @@ static int pblk_submit_recov_read(struct pblk *pblk, struct bio *bio,
 	return NVM_IO_OK;
 
 fail_ppa_free:
-	if ((nr_secs > 1) && (!(flags & PBLK_IOTYPE_GC)))
+	if ((nr_rec_secs > 1) && (!(flags & PBLK_IOTYPE_GC)))
 		nvm_dev_dma_free(pblk->dev, rqd->ppa_list, rqd->dma_ppa_list);
 fail_meta_free:
 	nvm_dev_dma_free(pblk->dev, rqd->meta_list, rqd->dma_meta_list);
