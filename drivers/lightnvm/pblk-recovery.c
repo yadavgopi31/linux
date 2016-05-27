@@ -254,11 +254,11 @@ static int pblk_submit_recov_read(struct pblk *pblk, struct bio *bio,
 	rqd->nr_ppas = valid_secs;
 	r_ctx->flags = flags;
 
-	if (bitmap_full(&read_bitmap, nr_secs)) {
+	if (bitmap_full(&read_bitmap, valid_secs)) {
 		bio_endio(bio);
 		pblk_end_io(rqd);
 		return NVM_IO_OK;
-	} else if (bitmap_empty(&read_bitmap, nr_secs)) {
+	} else if (bitmap_empty(&read_bitmap, valid_secs)) {
 #ifdef CONFIG_NVM_DEBUG
 		struct ppa_addr *ppa_list;
 
