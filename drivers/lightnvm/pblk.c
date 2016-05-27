@@ -1152,6 +1152,9 @@ static int pblk_buffer_write(struct pblk *pblk, struct bio *bio,
 	int ret = NVM_IO_DONE;
 
 	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA)) {
+#ifdef CONFIG_NVM_DEBUG
+		atomic_inc(&pblk->nr_flush);
+#endif
 		if (!bio_has_data(bio)) {
 			ret = pblk_rb_sync_point_set(&pblk->rwb, bio);
 			pblk_write_kick(pblk);
@@ -2592,6 +2595,7 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 #ifdef CONFIG_NVM_DEBUG
 	atomic_set(&pblk->inflight_writes, 0);
 	atomic_set(&pblk->padded_writes, 0);
+	atomic_set(&pblk->nr_flush, 0);
 	atomic_set(&pblk->req_writes, 0);
 	atomic_set(&pblk->sub_writes, 0);
 	atomic_set(&pblk->sync_writes, 0);
@@ -2677,10 +2681,11 @@ static void pblk_print_debug(void *private)
 	struct pblk_compl_ctx *c_ctx;
 	unsigned int i;
 
-	pr_info("pblk: %u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
+	pr_info("pblk: %u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
 				atomic_read(&pblk->inflight_writes),
 				atomic_read(&pblk->inflight_reads),
 				atomic_read(&pblk->req_writes),
+				atomic_read(&pblk->nr_flush),
 				atomic_read(&pblk->padded_writes),
 				atomic_read(&pblk->sub_writes),
 				atomic_read(&pblk->sync_writes),

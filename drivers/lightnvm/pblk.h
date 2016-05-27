@@ -293,6 +293,7 @@ struct pblk {
 	/* All debug counters apply to 4kb sector I/Os */
 	atomic_t inflight_writes;	/* Sectors not synced to media */
 	atomic_t padded_writes;		/* Sectors padded due to flush/fua */
+	atomic_t nr_flush;		/* Number of flush/fua I/O */
 	atomic_t req_writes;		/* Sectors stored on write buffer */
 	atomic_t sub_writes;		/* Sectors submitted from buffer */
 	atomic_t sync_writes;		/* Sectors synced to media */
