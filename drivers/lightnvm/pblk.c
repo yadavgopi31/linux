@@ -933,6 +933,7 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 {
 	void *comp_bits = &rqd->ppa_status;
 	struct pblk_ctx *ctx = pblk_set_ctx(pblk, rqd);
+	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 	struct pblk_rb_entry *entry;
 	struct pblk_w_ctx *w_ctx;
 	struct pblk_rec_ctx *recovery;
@@ -982,6 +983,9 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 	ppa_set_empty(&prev_ppa);
 	bit = -1;
 	while ((bit = find_next_bit(comp_bits, nr_ppas, bit + 1)) < nr_ppas) {
+		if (bit > c_ctx->nr_valid)
+			goto out;
+
 		ppa = rqd->ppa_list[bit];
 
 		entry = pblk_rb_sync_scan_entry(&pblk->rwb, &ppa);
@@ -1004,6 +1008,7 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 		pblk_run_recovery(pblk, w_ctx->ppa.rblk);
 	}
 
+out:
 	ret = pblk_setup_rec_end_rq(pblk, ctx, recovery, comp_bits, c_entries);
 	if (ret)
 		pr_err("pblk: could not recover from write failure\n");
