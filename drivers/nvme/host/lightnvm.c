@@ -20,6 +20,17 @@
  *
  */
 
+/*		ns->dev.class = &block_class;
+		ns->dev.type = &disk_type;
+		device_initialize(ns->dev);
+		ns->type = NVME_NS_LIGHTNVM;
+		dev_set_name(ctrl->dev, "%s", disk_name);
+		device_add(ctrl->dev);
+		blk_mq_register_disk(ctrl->dev, ns->queue);
+		sysfs_create_link(block_depr, &ctrl->dev->kobj,
+					kobject_name(&ctrl->dev->kobj));*/
+
+
 #include "nvme.h"
 
 #include <linux/nvme.h>
@@ -604,6 +615,7 @@ int nvme_nvm_register(struct nvme_ns *ns, char *disk_name, int node)
 	dev->q = q;
 	memcpy(dev->name, disk_name, DISK_NAME_LEN);
 	dev->ops = &nvme_nvm_dev_ops;
+	dev->parent_dev = ns->ctrl->device;
 	ns->ndev = dev;
 
 	return nvm_register(dev);

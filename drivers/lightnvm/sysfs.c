@@ -5,7 +5,6 @@
 
 #include "sysfs.h"
 
-static struct kset *devices;
 static struct kset *targets;
 
 /*
@@ -356,12 +355,37 @@ void nvm_sysfs_unregister_dev(struct nvm_dev *dev)
 	kobject_put(&dev->kobj);
 }
 
+static void nvm_release(struct device *dev)
+{
+/* fill in */
+}
+
+struct class nvm_class = {
+	.name		= "lightnvm",
+};
+
+static const struct attribute_group *nvm_attr_groups[] = {
+	NULL
+};
+
+static struct device_type nvm_type = {
+	.name		= "nvm",
+	.groups		= nvm_attr_groups,
+	.release	= nvm_release,
+};
+
 int nvm_sysfs_register_dev(struct nvm_dev *dev)
 {
 	int ret;
 
-	dev->kobj.kset = devices;
-	ret = kobject_init_and_add(&dev->kobj, &nvm_dev_ktype, NULL, "%s",
+	dev->dev.parent = dev->parent_dev;
+	dev_set_name(&dev->dev, "%s", dev->name);
+	dev->dev.class = &nvm_class;
+	dev->dev.type = &nvm_type;
+	device_initialize(&dev->dev);
+	device_add(&dev->dev);
+
+	ret = kobject_init_and_add(&dev->dev.kobj, &nvm_dev_ktype, NULL, "%s",
 				   dev->name);
 	if (ret < 0) {
 		pr_err("nvm/sysfs: `_register_dev` failed(%d).\n", ret);
@@ -391,28 +415,17 @@ int nvm_sysfs_register_dev(struct nvm_dev *dev)
 
 int nvm_sysfs_register(struct miscdevice *miscdev)
 {
-	devices = kset_create_and_add("devices", NULL,
-			kobject_get(&miscdev->this_device->kobj));
-	if (!devices)
-		goto devices_err;
-
 	targets = kset_create_and_add("targets", NULL,
 			kobject_get(&miscdev->this_device->kobj));
-	if (!targets)
-		goto targets_err;
+	if (!targets) {
+		kobject_put(&miscdev->this_device->kobj);
+		return -ENOMEM;
+	}
 
 	return 0;
-
-targets_err:
-	kobject_put(&miscdev->this_device->kobj);
-	kset_unregister(devices);
-devices_err:
-	kobject_put(&miscdev->this_device->kobj);
-	return -ENOMEM;
 }
 
 void nvm_sysfs_unregister(struct miscdevice *miscdev)
 {
 	kset_unregister(targets);
-	kset_unregister(devices);
 }
