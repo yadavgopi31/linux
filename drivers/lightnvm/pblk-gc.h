@@ -20,7 +20,19 @@
 
 #define PBLK_GC_TRIES 3
 
+int pblk_gc_init(struct pblk *pblk);
+void pblk_gc_exit(struct pblk *pblk);
+void pblk_gc_queue(struct work_struct *work);
+void pblk_lun_gc(struct work_struct *work);
 int pblk_gc_move_valid_pages(struct pblk *pblk, struct pblk_block *rblk,
 			     u64 *lba_list, unsigned int nr_entries);
+
+static inline int pblk_gc_invalidate_sec(struct pblk_block *rblk,
+					 struct ppa_addr a)
+{
+	rblk->nr_invalid_pages++;
+	return test_and_set_bit(a.ppa, rblk->invalid_pages);
+}
+
 #endif
 

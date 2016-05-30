@@ -455,3 +455,188 @@ out:
 	return moved;
 }
 
+void pblk_gc_queue(struct work_struct *work)
+{
+	struct pblk_block_ws *blk_ws = container_of(work, struct pblk_block_ws,
+									ws_blk);
+	struct pblk *pblk = blk_ws->pblk;
+	struct pblk_block *rblk = blk_ws->rblk;
+	struct pblk_lun *rlun = rblk->rlun;
+
+	spin_lock(&rlun->lock_lists);
+	list_move_tail(&rblk->list, &rlun->closed_list);
+	spin_unlock(&rlun->lock_lists);
+
+	spin_lock(&rlun->lock);
+	list_add_tail(&rblk->prio, &rlun->prio_list);
+	spin_unlock(&rlun->lock);
+
+	mempool_free(blk_ws, pblk->blk_ws_pool);
+	pr_debug("nvm: block '%lu' is full, allow GC (sched)\n",
+							rblk->parent->id);
+}
+
+
+/* the block with highest number of invalid pages, will be in the beginning
+ * of the list
+ */
+static struct pblk_block *rblock_max_invalid(struct pblk_block *ra,
+							struct pblk_block *rb)
+{
+	if (ra->nr_invalid_pages == rb->nr_invalid_pages)
+		return ra;
+
+	return (ra->nr_invalid_pages < rb->nr_invalid_pages) ? rb : ra;
+}
+
+/* linearly find the block with highest number of invalid pages
+ * requires lun->lock
+ */
+static struct pblk_block *block_prio_find_max(struct pblk_lun *rlun)
+{
+	struct list_head *prio_list = &rlun->prio_list;
+	struct pblk_block *rblk, *max;
+
+	BUG_ON(list_empty(prio_list));
+
+	max = list_first_entry(prio_list, struct pblk_block, prio);
+	list_for_each_entry(rblk, prio_list, prio)
+		max = rblock_max_invalid(max, rblk);
+
+	return max;
+}
+
+static void pblk_block_gc(struct work_struct *work)
+{
+	struct pblk_block_ws *blk_ws = container_of(work, struct pblk_block_ws,
+									ws_blk);
+	struct pblk *pblk = blk_ws->pblk;
+	struct pblk_block *rblk = blk_ws->rblk;
+	struct pblk_lun *rlun = rblk->rlun;
+	/* struct nvm_dev *dev = pblk->dev; */
+
+	// XXX: Prevent GC from running for now
+	return;
+
+	mempool_free(blk_ws, pblk->blk_ws_pool);
+	pr_debug("pblk: block '%lu' being reclaimed\n", rblk->parent->id);
+
+	/* if (pblk_move_valid_pages(pblk, rblk)) */
+		/* goto put_back; */
+
+	/* if (nvm_erase_blk(dev, rblk->parent)) */
+		/* goto put_back; */
+
+	/* pblk_put_blk(pblk, rblk); */
+	return;
+
+/* put_back: */
+	spin_lock(&rlun->lock);
+	list_add_tail(&rblk->prio, &rlun->prio_list);
+	spin_unlock(&rlun->lock);
+}
+
+void pblk_lun_gc(struct work_struct *work)
+{
+	struct pblk_lun *rlun = container_of(work, struct pblk_lun, ws_gc);
+	struct pblk *pblk = rlun->pblk;
+	struct nvm_lun *lun = rlun->parent;
+	struct pblk_block_ws *blk_ws;
+	unsigned int nr_blocks_need;
+
+	/* JAVIER: TO GO when enabling GC */
+	return;
+
+	nr_blocks_need = pblk->nr_luns *
+				(pblk->dev->blks_per_lun / GC_LIMIT_INVERSE);
+
+	if (nr_blocks_need < pblk->nr_luns)
+		nr_blocks_need = pblk->nr_luns;
+
+	spin_lock(&rlun->lock);
+	while (nr_blocks_need > lun->nr_free_blocks &&
+					!list_empty(&rlun->prio_list)) {
+		struct pblk_block *rblk = block_prio_find_max(rlun);
+		struct nvm_block *block = rblk->parent;
+
+		if (!rblk->nr_invalid_pages)
+			break;
+
+		blk_ws = mempool_alloc(pblk->blk_ws_pool, GFP_ATOMIC);
+		if (!blk_ws)
+			break;
+
+		list_del_init(&rblk->prio);
+
+		BUG_ON(!block_is_full(pblk, rblk));
+
+		/* We can free page bitmap at this point */
+		kfree(rblk->pages);
+
+		pr_debug("pblk: selected block '%lu' for GC\n", block->id);
+
+		blk_ws->pblk = pblk;
+		blk_ws->rblk = rblk;
+
+		INIT_WORK(&blk_ws->ws_blk, pblk_block_gc);
+		queue_work(pblk->kgc_wq, &blk_ws->ws_blk);
+
+		nr_blocks_need--;
+	}
+	spin_unlock(&rlun->lock);
+
+	/* TODO: Hint that request queue can be started again */
+}
+
+static void pblk_gc_kick(struct pblk *pblk)
+{
+	struct pblk_lun *rlun;
+	unsigned int i;
+
+	for (i = 0; i < pblk->nr_luns; i++) {
+		rlun = &pblk->luns[i];
+		queue_work(pblk->krqd_wq, &rlun->ws_gc);
+	}
+}
+
+/*
+ * timed GC every interval.
+ */
+static void pblk_gc_timer(unsigned long data)
+{
+	struct pblk *pblk = (struct pblk *)data;
+
+	pblk_gc_kick(pblk);
+	mod_timer(&pblk->gc_timer, jiffies + msecs_to_jiffies(10));
+}
+
+int pblk_gc_init(struct pblk *pblk)
+{
+	pblk->krqd_wq = alloc_workqueue("pblk-lun", WQ_MEM_RECLAIM | WQ_UNBOUND,
+								pblk->nr_luns);
+	if (!pblk->krqd_wq)
+		return -ENOMEM;
+
+	pblk->kgc_wq = alloc_workqueue("pblk-bg", WQ_MEM_RECLAIM, 1);
+	if (!pblk->kgc_wq)
+		return -ENOMEM;
+
+	setup_timer(&pblk->gc_timer, pblk_gc_timer, (unsigned long)pblk);
+
+	return 0;
+}
+
+void pblk_gc_exit(struct pblk *pblk)
+{
+	del_timer(&pblk->gc_timer);
+	flush_workqueue(pblk->kgc_wq);
+
+	if (pblk->krqd_wq)
+		destroy_workqueue(pblk->krqd_wq);
+
+	if (pblk->kgc_wq)
+		destroy_workqueue(pblk->kgc_wq);
+}
+
+
+

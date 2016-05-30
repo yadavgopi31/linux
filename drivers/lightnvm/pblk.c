@@ -19,6 +19,7 @@
  */
 
 #include "pblk.h"
+#include "pblk-gc.h"
 #include "pblk-recovery.h"
 
 unsigned long pblk_r_rq_size, pblk_w_rq_size;
@@ -27,23 +28,38 @@ static struct kmem_cache *pblk_blk_ws_cache, *pblk_rec_cache, *pblk_r_rq_cache,
 static DECLARE_RWSEM(pblk_lock);
 static int pblk_submit_io(struct pblk *pblk, struct bio *bio,
 							unsigned long flags);
-static void pblk_run_gc(struct pblk *pblk, struct pblk_block *rblk,
-					void(*work)(struct work_struct *));
 
 #define pblk_for_each_lun(pblk, rlun, i) \
 		for ((i) = 0, rlun = &(pblk)->luns[0]; \
 			(i) < (pblk)->nr_luns; (i)++, rlun = &(pblk)->luns[(i)])
 
+static void pblk_run_blk_ws(struct pblk *pblk, struct pblk_block *rblk,
+					void(*work)(struct work_struct *))
+{
+	struct pblk_block_ws *blk_ws;
+
+	blk_ws = mempool_alloc(pblk->blk_ws_pool, GFP_ATOMIC);
+	if (!blk_ws) {
+		pr_err("pblk: unable to queue block work.");
+		return;
+	}
+
+	blk_ws->pblk = pblk;
+	blk_ws->rblk = rblk;
+
+	INIT_WORK(&blk_ws->ws_blk, work);
+	queue_work(pblk->kgc_wq, &blk_ws->ws_blk);
+}
+
 /* The ppa in pblk_addr comes with an offset format, not a global format */
 static void pblk_page_pad_invalidate(struct pblk *pblk, struct pblk_block *rblk,
 							struct ppa_addr a)
 {
-	WARN_ON(test_and_set_bit(a.ppa, rblk->invalid_pages));
-	rblk->nr_invalid_pages++;
+	WARN_ON(pblk_gc_invalidate_sec(rblk, a));
 
 	WARN_ON(test_and_set_bit(a.ppa, rblk->sync_bitmap));
 	if (bitmap_full(rblk->sync_bitmap, pblk->nr_blk_dsecs))
-		pblk_run_gc(pblk, rblk, pblk_close_rblk_queue);
+		pblk_run_blk_ws(pblk, rblk, pblk_close_rblk_queue);
 }
 
 static void pblk_invalidate_range(struct pblk *pblk, sector_t slba,
@@ -301,35 +317,6 @@ static struct pblk_lun *get_next_lun(struct pblk *pblk)
 	return &pblk->luns[next % pblk->nr_luns];
 }
 
-static void pblk_gc_kick(struct pblk *pblk)
-{
-	struct pblk_lun *rlun;
-	unsigned int i;
-
-	for (i = 0; i < pblk->nr_luns; i++) {
-		rlun = &pblk->luns[i];
-		queue_work(pblk->krqd_wq, &rlun->ws_gc);
-	}
-}
-
-static void pblk_run_gc(struct pblk *pblk, struct pblk_block *rblk,
-					void(*work)(struct work_struct *))
-{
-	struct pblk_block_ws *blk_ws;
-
-	blk_ws = mempool_alloc(pblk->blk_ws_pool, GFP_ATOMIC);
-	if (!blk_ws) {
-		pr_err("pblk: unable to queue block for gc.");
-		return;
-	}
-
-	blk_ws->pblk = pblk;
-	blk_ws->rblk = rblk;
-
-	INIT_WORK(&blk_ws->ws_blk, work);
-	queue_work(pblk->kgc_wq, &blk_ws->ws_blk);
-}
-
 /* TODO: Need to implement the different strategies */
 int pblk_calc_secs_to_sync(struct pblk *pblk, unsigned long secs_avail,
 				  unsigned long secs_to_flush)
@@ -371,38 +358,6 @@ int pblk_calc_secs_to_sync(struct pblk *pblk, unsigned long secs_avail,
 	return secs_to_sync;
 }
 
-static void pblk_gc_queue(struct work_struct *work)
-{
-	struct pblk_block_ws *blk_ws = container_of(work, struct pblk_block_ws,
-									ws_blk);
-	struct pblk *pblk = blk_ws->pblk;
-	struct pblk_block *rblk = blk_ws->rblk;
-	struct pblk_lun *rlun = rblk->rlun;
-
-	spin_lock(&rlun->lock_lists);
-	list_move_tail(&rblk->list, &rlun->closed_list);
-	spin_unlock(&rlun->lock_lists);
-
-	spin_lock(&rlun->lock);
-	list_add_tail(&rblk->prio, &rlun->prio_list);
-	spin_unlock(&rlun->lock);
-
-	mempool_free(blk_ws, pblk->blk_ws_pool);
-	pr_debug("nvm: block '%lu' is full, allow GC (sched)\n",
-							rblk->parent->id);
-}
-
-/*
- * timed GC every interval.
- */
-static void pblk_gc_timer(unsigned long data)
-{
-	struct pblk *pblk = (struct pblk *)data;
-
-	pblk_gc_kick(pblk);
-	mod_timer(&pblk->gc_timer, jiffies + msecs_to_jiffies(10));
-}
-
 void pblk_end_sync_bio(struct bio *bio)
 {
 	struct completion *waiting = bio->bi_private;
@@ -422,122 +377,11 @@ static void pblk_end_close_blk_bio(struct pblk *pblk, struct nvm_rq *rqd,
 	struct pblk_compl_close_ctx *c_ctx = ctx->c_ctx;
 
 	if (run_gc)
-		pblk_run_gc(pblk, c_ctx->rblk, pblk_gc_queue);
+		pblk_run_blk_ws(pblk, c_ctx->rblk, pblk_gc_queue);
 
 	nvm_free_rqd_ppalist(dev, rqd);
 	bio_put(rqd->bio);
 	kfree(rqd);
-}
-
-static void pblk_block_gc(struct work_struct *work)
-{
-	struct pblk_block_ws *blk_ws = container_of(work, struct pblk_block_ws,
-									ws_blk);
-	struct pblk *pblk = blk_ws->pblk;
-	struct pblk_block *rblk = blk_ws->rblk;
-	struct pblk_lun *rlun = rblk->rlun;
-	/* struct nvm_dev *dev = pblk->dev; */
-
-	// XXX: Prevent GC from running for now
-	return;
-
-	mempool_free(blk_ws, pblk->blk_ws_pool);
-	pr_debug("pblk: block '%lu' being reclaimed\n", rblk->parent->id);
-
-	/* if (pblk_move_valid_pages(pblk, rblk)) */
-		/* goto put_back; */
-
-	/* if (nvm_erase_blk(dev, rblk->parent)) */
-		/* goto put_back; */
-
-	/* pblk_put_blk(pblk, rblk); */
-	return;
-
-/* put_back: */
-	spin_lock(&rlun->lock);
-	list_add_tail(&rblk->prio, &rlun->prio_list);
-	spin_unlock(&rlun->lock);
-}
-
-/* the block with highest number of invalid pages, will be in the beginning
- * of the list
- */
-static struct pblk_block *rblock_max_invalid(struct pblk_block *ra,
-							struct pblk_block *rb)
-{
-	if (ra->nr_invalid_pages == rb->nr_invalid_pages)
-		return ra;
-
-	return (ra->nr_invalid_pages < rb->nr_invalid_pages) ? rb : ra;
-}
-
-/* linearly find the block with highest number of invalid pages
- * requires lun->lock
- */
-static struct pblk_block *block_prio_find_max(struct pblk_lun *rlun)
-{
-	struct list_head *prio_list = &rlun->prio_list;
-	struct pblk_block *rblk, *max;
-
-	BUG_ON(list_empty(prio_list));
-
-	max = list_first_entry(prio_list, struct pblk_block, prio);
-	list_for_each_entry(rblk, prio_list, prio)
-		max = rblock_max_invalid(max, rblk);
-
-	return max;
-}
-
-static void pblk_lun_gc(struct work_struct *work)
-{
-	struct pblk_lun *rlun = container_of(work, struct pblk_lun, ws_gc);
-	struct pblk *pblk = rlun->pblk;
-	struct nvm_lun *lun = rlun->parent;
-	struct pblk_block_ws *blk_ws;
-	unsigned int nr_blocks_need;
-
-	/* JAVIER: TO GO when enabling GC */
-	return;
-
-	nr_blocks_need = pblk->nr_luns *
-				(pblk->dev->blks_per_lun / GC_LIMIT_INVERSE);
-
-	if (nr_blocks_need < pblk->nr_luns)
-		nr_blocks_need = pblk->nr_luns;
-
-	spin_lock(&rlun->lock);
-	while (nr_blocks_need > lun->nr_free_blocks &&
-					!list_empty(&rlun->prio_list)) {
-		struct pblk_block *rblk = block_prio_find_max(rlun);
-		struct nvm_block *block = rblk->parent;
-
-		if (!rblk->nr_invalid_pages)
-			break;
-
-		blk_ws = mempool_alloc(pblk->blk_ws_pool, GFP_ATOMIC);
-		if (!blk_ws)
-			break;
-
-		list_del_init(&rblk->prio);
-
-		BUG_ON(!block_is_full(pblk, rblk));
-
-		/* We can free page bitmap at this point */
-		kfree(rblk->pages);
-
-		pr_debug("pblk: selected block '%lu' for GC\n", block->id);
-
-		blk_ws->pblk = pblk;
-		blk_ws->rblk = rblk;
-
-		INIT_WORK(&blk_ws->ws_blk, pblk_block_gc);
-		queue_work(pblk->kgc_wq, &blk_ws->ws_blk);
-
-		nr_blocks_need--;
-	}
-	spin_unlock(&rlun->lock);
-
-	/* TODO: Hint that request queue can be started again */
 }
 
 static const struct block_device_operations pblk_fops = {
@@ -804,7 +648,7 @@ static void pblk_sync_buffer(struct pblk *pblk, struct pblk_addr p, int flags)
 
 	/* If last page completed, then this is not a grown bad blodk */
 	if (bitmap_full(rblk->sync_bitmap, pblk->nr_blk_dsecs))
-		pblk_run_gc(pblk, rblk, pblk_close_rblk_queue);
+		pblk_run_blk_ws(pblk, rblk, pblk_close_rblk_queue);
 }
 
 static void pblk_end_w_pad(struct pblk *pblk, struct nvm_rq *rqd,
@@ -1942,31 +1786,6 @@ static void pblk_requeue(struct work_struct *work)
 		pblk_make_rq(pblk->disk->queue, bio);
 }
 
-static void pblk_gc_free(struct pblk *pblk)
-{
-	if (pblk->krqd_wq)
-		destroy_workqueue(pblk->krqd_wq);
-
-	if (pblk->kgc_wq)
-		destroy_workqueue(pblk->kgc_wq);
-}
-
-static int pblk_gc_init(struct pblk *pblk)
-{
-	pblk->krqd_wq = alloc_workqueue("pblk-lun", WQ_MEM_RECLAIM | WQ_UNBOUND,
-								pblk->nr_luns);
-	if (!pblk->krqd_wq)
-		return -ENOMEM;
-
-	pblk->kgc_wq = alloc_workqueue("pblk-bg", WQ_MEM_RECLAIM, 1);
-	if (!pblk->kgc_wq)
-		return -ENOMEM;
-
-	setup_timer(&pblk->gc_timer, pblk_gc_timer, (unsigned long)pblk);
-
-	return 0;
-}
-
 static void pblk_map_free(struct pblk *pblk)
 {
 	vfree(pblk->trans_map);
@@ -2288,7 +2107,6 @@ static void pblk_area_free(struct pblk *pblk)
 
 static void pblk_free(struct pblk *pblk)
 {
-	pblk_gc_free(pblk);
 	pblk_map_free(pblk);
 	pblk_core_free(pblk);
 	pblk_luns_free(pblk);
@@ -2476,9 +2294,8 @@ static void pblk_exit(void *private)
 	struct pblk *pblk = private;
 
 	down_write(&pblk_lock);
-	del_timer(&pblk->gc_timer);
 	flush_workqueue(pblk->krqd_wq);
-	flush_workqueue(pblk->kgc_wq);
+	pblk_gc_exit(pblk);
 	pblk_tear_down(pblk);
 	pblk_free(pblk);
 	up_write(&pblk_lock);
