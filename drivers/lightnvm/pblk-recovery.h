@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * Implementation of a physical block-device target for Open-channel SSDs.
+ * Recovery for pblk: physical block-device target
  */
 
 #ifndef PBLK_RECOVERY_H

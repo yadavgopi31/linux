@@ -1,5 +1,4 @@
 /*
- * Copyright (C) 2015 IT University of Copenhagen (rrpc.c)
  * Copyright (C) 2016 CNEX Labs
  * Initial: Javier Gonzalez <jg@lightnvm.io>
  *
@@ -12,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * Implementation of a physical block-device target for Open-channel SSDs.
+ * Recovery for pblk: physical block-device target
  */
 
 #include "pblk.h"
