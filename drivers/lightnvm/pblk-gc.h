@@ -14,15 +14,11 @@
  * Implementation of a physical block-device target for Open-channel SSDs.
  */
 
-#ifndef PBLK_RECOVERY_H
-#define PBLK_RECOVERY_H
+#ifndef PBLK_GC_H
 
-void pblk_run_recovery(struct pblk *pblk, struct pblk_block *rblk);
-int pblk_setup_rec_end_rq(struct pblk *pblk, struct pblk_ctx *ctx,
-			  struct pblk_rec_ctx *recovery, u64 *comp_bits,
-			  unsigned int c_entries);
+#define PBLK_GC_TRIES 3
 
-int pblk_scan_recover_blk(struct pblk *pblk, struct pblk_block *rblk);
-void pblk_close_rblk_queue(struct work_struct *work);
-
+int pblk_gc_move_valid_pages(struct pblk *pblk, struct pblk_block *rblk,
+			     u64 *lba_list, unsigned int nr_entries);
 #endif
+

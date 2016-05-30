@@ -418,6 +418,11 @@ void pblk_end_sync_bio(struct bio *bio);
 void pblk_rb_print_debug(struct pblk_rb *rb);
 #endif
 
+static inline void pblk_write_kick(struct pblk *pblk)
+{
+	queue_work(pblk->kw_wq, &pblk->ws_writer);
+}
+
 static inline void *pblk_rlpg_to_llba(struct pblk_blk_rec_lpg *lpg)
 {
 	return lpg + 1;
@@ -488,7 +493,8 @@ static u64 block_to_addr(struct pblk *pblk, struct pblk_block *rblk)
 	return blk->id * pblk->dev->sec_per_blk;
 }
 
-static u64 global_addr(struct pblk *pblk, struct pblk_block *rblk, u64 paddr)
+static inline u64 global_addr(struct pblk *pblk, struct pblk_block *rblk,
+			      u64 paddr)
 {
 	return block_to_addr(pblk, rblk) + paddr;
 }
@@ -537,7 +543,7 @@ static struct ppa_addr linear_to_generic_addr(struct nvm_dev *dev,
 	return l;
 }
 
-static struct ppa_addr pblk_ppa_to_gaddr(struct nvm_dev *dev, u64 addr)
+static inline struct ppa_addr pblk_ppa_to_gaddr(struct nvm_dev *dev, u64 addr)
 {
 	struct ppa_addr paddr;
 

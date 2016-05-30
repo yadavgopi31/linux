@@ -321,11 +321,6 @@ static void pblk_gc_kick(struct pblk *pblk)
 	}
 }
 
-static void pblk_write_kick(struct pblk *pblk)
-{
-	queue_work(pblk->kw_wq, &pblk->ws_writer);
-}
-
 static void pblk_run_gc(struct pblk *pblk, struct pblk_block *rblk,
 					void(*work)(struct work_struct *))
 {
