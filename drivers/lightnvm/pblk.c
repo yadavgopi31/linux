@@ -1461,6 +1461,7 @@ err:
 	/* Free allocated pages in new bio */
 	pblk_bio_free_pages(pblk, bio, 0, new_bio->bi_vcnt);
 	bio_endio(new_bio);
+	pblk_end_io(rqd);
 	return NVM_IO_ERR;
 }
 
