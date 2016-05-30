@@ -294,15 +294,6 @@ out:
 	return ret;
 }
 
-/* static void pblk_lun_prov(struct work_struct *work) */
-/* { */
-	/* struct pblk_lun *rlun = container_of(work, struct pblk_lun, ws_prov); */
-	/* struct pblk *pblk = rlun->pblk; */
-	/* struct pblk_block *rblk; */
-/*  */
-	/* pblk_replace_blk(pblk, rblk, rlun, 1); */
-/* } */
-
 static struct pblk_lun *get_next_lun(struct pblk *pblk)
 {
 	int next = atomic_inc_return(&pblk->next_lun);
