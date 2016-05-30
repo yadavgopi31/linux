@@ -319,7 +319,7 @@ struct pblk {
 	struct list_head compl_list;
 
 	mempool_t *page_pool;
-	mempool_t *gcb_pool;
+	mempool_t *blk_ws_pool;
 	mempool_t *rec_pool;
 	mempool_t *r_rq_pool;
 	mempool_t *w_rq_pool;
@@ -330,10 +330,10 @@ struct pblk {
 	struct workqueue_struct *kw_wq;
 };
 
-struct pblk_block_gc {
+struct pblk_block_ws {
 	struct pblk *pblk;
 	struct pblk_block *rblk;
-	struct work_struct ws_gc;
+	struct work_struct ws_blk;
 };
 
 /*

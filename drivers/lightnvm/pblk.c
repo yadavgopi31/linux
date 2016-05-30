@@ -22,7 +22,7 @@
 #include "pblk-recovery.h"
 
 unsigned long pblk_r_rq_size, pblk_w_rq_size;
-static struct kmem_cache *pblk_gcb_cache, *pblk_rec_cache, *pblk_r_rq_cache,
+static struct kmem_cache *pblk_blk_ws_cache, *pblk_rec_cache, *pblk_r_rq_cache,
 							*pblk_w_rq_cache;
 static DECLARE_RWSEM(pblk_lock);
 static int pblk_submit_io(struct pblk *pblk, struct bio *bio,
@@ -315,19 +315,19 @@ static void pblk_gc_kick(struct pblk *pblk)
 static void pblk_run_gc(struct pblk *pblk, struct pblk_block *rblk,
 					void(*work)(struct work_struct *))
 {
-	struct pblk_block_gc *gcb;
+	struct pblk_block_ws *blk_ws;
 
-	gcb = mempool_alloc(pblk->gcb_pool, GFP_ATOMIC);
-	if (!gcb) {
+	blk_ws = mempool_alloc(pblk->blk_ws_pool, GFP_ATOMIC);
+	if (!blk_ws) {
 		pr_err("pblk: unable to queue block for gc.");
 		return;
 	}
 
-	gcb->pblk = pblk;
-	gcb->rblk = rblk;
+	blk_ws->pblk = pblk;
+	blk_ws->rblk = rblk;
 
-	INIT_WORK(&gcb->ws_gc, work);
-	queue_work(pblk->kgc_wq, &gcb->ws_gc);
+	INIT_WORK(&blk_ws->ws_blk, work);
+	queue_work(pblk->kgc_wq, &blk_ws->ws_blk);
 }
 
 /* TODO: Need to implement the different strategies */
@@ -373,10 +373,10 @@ int pblk_calc_secs_to_sync(struct pblk *pblk, unsigned long secs_avail,
 
 static void pblk_gc_queue(struct work_struct *work)
 {
-	struct pblk_block_gc *gcb = container_of(work, struct pblk_block_gc,
-									ws_gc);
-	struct pblk *pblk = gcb->pblk;
-	struct pblk_block *rblk = gcb->rblk;
+	struct pblk_block_ws *blk_ws = container_of(work, struct pblk_block_ws,
+									ws_blk);
+	struct pblk *pblk = blk_ws->pblk;
+	struct pblk_block *rblk = blk_ws->rblk;
 	struct pblk_lun *rlun = rblk->rlun;
 
 	spin_lock(&rlun->lock_lists);
@@ -387,7 +387,7 @@ static void pblk_gc_queue(struct work_struct *work)
 	list_add_tail(&rblk->prio, &rlun->prio_list);
 	spin_unlock(&rlun->lock);
 
-	mempool_free(gcb, pblk->gcb_pool);
+	mempool_free(blk_ws, pblk->blk_ws_pool);
 	pr_debug("nvm: block '%lu' is full, allow GC (sched)\n",
 							rblk->parent->id);
 }
@@ -431,17 +431,17 @@ static void pblk_end_close_blk_bio(struct pblk *pblk, struct nvm_rq *rqd,
 
 static void pblk_block_gc(struct work_struct *work)
 {
-	struct pblk_block_gc *gcb = container_of(work, struct pblk_block_gc,
-									ws_gc);
-	struct pblk *pblk = gcb->pblk;
-	struct pblk_block *rblk = gcb->rblk;
+	struct pblk_block_ws *blk_ws = container_of(work, struct pblk_block_ws,
+									ws_blk);
+	struct pblk *pblk = blk_ws->pblk;
+	struct pblk_block *rblk = blk_ws->rblk;
 	struct pblk_lun *rlun = rblk->rlun;
 	/* struct nvm_dev *dev = pblk->dev; */
 
 	// XXX: Prevent GC from running for now
 	return;
 
-	mempool_free(gcb, pblk->gcb_pool);
+	mempool_free(blk_ws, pblk->blk_ws_pool);
 	pr_debug("pblk: block '%lu' being reclaimed\n", rblk->parent->id);
 
 	/* if (pblk_move_valid_pages(pblk, rblk)) */
@@ -493,7 +493,7 @@ static void pblk_lun_gc(struct work_struct *work)
 	struct pblk_lun *rlun = container_of(work, struct pblk_lun, ws_gc);
 	struct pblk *pblk = rlun->pblk;
 	struct nvm_lun *lun = rlun->parent;
-	struct pblk_block_gc *gcb;
+	struct pblk_block_ws *blk_ws;
 	unsigned int nr_blocks_need;
 
 	/* JAVIER: TO GO when enabling GC */
@@ -514,8 +514,8 @@ static void pblk_lun_gc(struct work_struct *work)
 		if (!rblk->nr_invalid_pages)
 			break;
 
-		gcb = mempool_alloc(pblk->gcb_pool, GFP_ATOMIC);
-		if (!gcb)
+		blk_ws = mempool_alloc(pblk->blk_ws_pool, GFP_ATOMIC);
+		if (!blk_ws)
 			break;
 
 		list_del_init(&rblk->prio);
@@ -527,11 +527,11 @@ static void pblk_lun_gc(struct work_struct *work)
 
 		pr_debug("pblk: selected block '%lu' for GC\n", block->id);
 
-		gcb->pblk = pblk;
-		gcb->rblk = rblk;
+		blk_ws->pblk = pblk;
+		blk_ws->rblk = rblk;
 
-		INIT_WORK(&gcb->ws_gc, pblk_block_gc);
-		queue_work(pblk->kgc_wq, &gcb->ws_gc);
+		INIT_WORK(&blk_ws->ws_blk, pblk_block_gc);
+		queue_work(pblk->kgc_wq, &blk_ws->ws_blk);
 
 		nr_blocks_need--;
 	}
@@ -2053,10 +2053,10 @@ static int pblk_rwb_init(struct pblk *pblk)
 static int pblk_core_init(struct pblk *pblk)
 {
 	down_write(&pblk_lock);
-	if (!pblk_gcb_cache) {
-		pblk_gcb_cache = kmem_cache_create("pblk_gcb",
-				sizeof(struct pblk_block_gc), 0, 0, NULL);
-		if (!pblk_gcb_cache) {
+	if (!pblk_blk_ws_cache) {
+		pblk_blk_ws_cache = kmem_cache_create("pblk_blk_ws",
+				sizeof(struct pblk_block_ws), 0, 0, NULL);
+		if (!pblk_blk_ws_cache) {
 			up_write(&pblk_lock);
 			return -ENOMEM;
 		}
@@ -2064,7 +2064,7 @@ static int pblk_core_init(struct pblk *pblk)
 		pblk_rec_cache = kmem_cache_create("pblk_rec",
 				sizeof(struct pblk_rec_ctx), 0, 0, NULL);
 		if (!pblk_rec_cache) {
-			kmem_cache_destroy(pblk_gcb_cache);
+			kmem_cache_destroy(pblk_blk_ws_cache);
 			up_write(&pblk_lock);
 			return -ENOMEM;
 		}
@@ -2074,7 +2074,7 @@ static int pblk_core_init(struct pblk *pblk)
 		pblk_r_rq_cache = kmem_cache_create("pblk_r_rq", pblk_r_rq_size,
 				0, 0, NULL);
 		if (!pblk_r_rq_cache) {
-			kmem_cache_destroy(pblk_gcb_cache);
+			kmem_cache_destroy(pblk_blk_ws_cache);
 			kmem_cache_destroy(pblk_rec_cache);
 			up_write(&pblk_lock);
 			return -ENOMEM;
@@ -2086,7 +2086,7 @@ static int pblk_core_init(struct pblk *pblk)
 		pblk_w_rq_cache = kmem_cache_create("pblk_w_rq", pblk_w_rq_size,
 				0, 0, NULL);
 		if (!pblk_w_rq_cache) {
-			kmem_cache_destroy(pblk_gcb_cache);
+			kmem_cache_destroy(pblk_blk_ws_cache);
 			kmem_cache_destroy(pblk_rec_cache);
 			kmem_cache_destroy(pblk_r_rq_cache);
 			up_write(&pblk_lock);
@@ -2099,15 +2099,15 @@ static int pblk_core_init(struct pblk *pblk)
 	if (!pblk->page_pool)
 		return -ENOMEM;
 
-	pblk->gcb_pool = mempool_create_slab_pool(pblk->dev->nr_luns,
-								pblk_gcb_cache);
-	if (!pblk->gcb_pool)
+	pblk->blk_ws_pool = mempool_create_slab_pool(pblk->dev->nr_luns,
+							pblk_blk_ws_cache);
+	if (!pblk->blk_ws_pool)
 		goto free_page_pool;
 
 	pblk->rec_pool = mempool_create_slab_pool(pblk->dev->nr_luns,
-								pblk_rec_cache);
+							pblk_rec_cache);
 	if (!pblk->rec_pool)
-		goto free_gcb_pool;
+		goto free_blk_ws_pool;
 
 	pblk->r_rq_pool = mempool_create_slab_pool(64, pblk_r_rq_cache);
 	if (!pblk->r_rq_pool)
@@ -2138,8 +2138,8 @@ free_r_rq_pool:
 	mempool_destroy(pblk->r_rq_pool);
 free_rec_pool:
 	mempool_destroy(pblk->rec_pool);
-free_gcb_pool:
-	mempool_destroy(pblk->gcb_pool);
+free_blk_ws_pool:
+	mempool_destroy(pblk->blk_ws_pool);
 free_page_pool:
 	mempool_destroy(pblk->page_pool);
 
@@ -2153,7 +2153,7 @@ static void pblk_core_free(struct pblk *pblk)
 		destroy_workqueue(pblk->kw_wq);
 
 	mempool_destroy(pblk->page_pool);
-	mempool_destroy(pblk->gcb_pool);
+	mempool_destroy(pblk->blk_ws_pool);
 	mempool_destroy(pblk->r_rq_pool);
 	mempool_destroy(pblk->w_rq_pool);
 }
@@ -2252,7 +2252,6 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 		rlun->nr_bad_blocks = 0;
 
 		INIT_WORK(&rlun->ws_gc, pblk_lun_gc);
-		/* INIT_WORK(&rlun->ws_prov, pblk_lun_prov); */
 
 		spin_lock_init(&rlun->lock);
 		spin_lock_init(&rlun->lock_lists);

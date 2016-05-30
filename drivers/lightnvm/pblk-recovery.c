@@ -27,10 +27,10 @@ extern unsigned long pblk_r_rq_size, pblk_w_rq_size;
 
 static void pblk_rec_valid_pgs(struct work_struct *work)
 {
-	struct pblk_block_gc *gcb = container_of(work, struct pblk_block_gc,
-									ws_gc);
-	struct pblk *pblk = gcb->pblk;
-	struct pblk_block *rblk = gcb->rblk;
+	struct pblk_block_ws *blk_ws = container_of(work, struct pblk_block_ws,
+									ws_blk);
+	struct pblk *pblk = blk_ws->pblk;
+	struct pblk_block *rblk = blk_ws->rblk;
 	struct pblk_blk_rec_lpg *rlpg = rblk->rlpg;
 	u64 *lba_list = pblk_rlpg_to_llba(rlpg);
 	unsigned int nr_entries;
@@ -79,10 +79,10 @@ retry:
 	 * TODO: Clean bb_list when doing GC
 	 */
 
-	mempool_free(gcb, pblk->gcb_pool);
+	mempool_free(blk_ws, pblk->blk_ws_pool);
 	return;
 out:
-	mempool_free(gcb, pblk->gcb_pool);
+	mempool_free(blk_ws, pblk->blk_ws_pool);
 }
 
 static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
@@ -211,20 +211,20 @@ fail:
 
 void pblk_run_recovery(struct pblk *pblk, struct pblk_block *rblk)
 {
-	struct pblk_block_gc *gcb;
+	struct pblk_block_ws *blk_ws;
 
-	gcb = mempool_alloc(pblk->gcb_pool, GFP_ATOMIC);
-	if (!gcb) {
+	blk_ws = mempool_alloc(pblk->blk_ws_pool, GFP_ATOMIC);
+	if (!blk_ws) {
 		pr_err("pblk: unable to queue block for recovery gc.");
 		return;
 	}
 
-	gcb->pblk = pblk;
-	gcb->rblk = rblk;
+	blk_ws->pblk = pblk;
+	blk_ws->rblk = rblk;
 
 	/* Move data from grown bad block */
-	INIT_WORK(&gcb->ws_gc, pblk_rec_valid_pgs);
-	queue_work(pblk->kgc_wq, &gcb->ws_gc);
+	INIT_WORK(&blk_ws->ws_blk, pblk_rec_valid_pgs);
+	queue_work(pblk->kgc_wq, &blk_ws->ws_blk);
 }
 
 int pblk_setup_rec_end_rq(struct pblk *pblk, struct pblk_ctx *ctx,
@@ -500,17 +500,17 @@ fail_alloc_rqd:
 
 void pblk_close_rblk_queue(struct work_struct *work)
 {
-	struct pblk_block_gc *gcb = container_of(work, struct pblk_block_gc,
-									ws_gc);
-	struct pblk *pblk = gcb->pblk;
-	struct pblk_block *rblk = gcb->rblk;
+	struct pblk_block_ws *blk_ws = container_of(work, struct pblk_block_ws,
+									ws_blk);
+	struct pblk *pblk = blk_ws->pblk;
+	struct pblk_block *rblk = blk_ws->rblk;
 
 	if (likely(!block_is_bad(rblk)))
 		pblk_close_rblk(pblk, rblk);
 
 	kfree(rblk->sync_bitmap);
 	rblk->sync_bitmap = NULL;
-	mempool_free(gcb, pblk->gcb_pool);
+	mempool_free(blk_ws, pblk->blk_ws_pool);
 }
 
 
