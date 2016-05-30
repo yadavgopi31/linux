@@ -157,8 +157,6 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 
 		BUG_ON(!(lba >= 0 && lba < pblk->nr_secs));
 
-		(*valid_secs)++;
-
 		/* Try to read from write buffer. Those addresses that cannot be
 		 * read from the write buffer are sequentially added to the ppa
 		 * list, which will later on be used to submit an I/O to the
@@ -171,7 +169,8 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 				 * advance it to copy data to the right place.
 				 * We will deal with partial bios later on.
 				 */
-				bio_advance(bio, i * PBLK_EXPOSED_PAGE_SIZE);
+				bio_advance(bio, (*valid_secs) *
+							PBLK_EXPOSED_PAGE_SIZE);
 				advanced_bio = 1;
 			}
 			pblk_read_from_cache(pblk, bio, *p);
@@ -182,6 +181,8 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 			rqd->ppa_list[j] = *p;
 			j++;
 		}
+
+		(*valid_secs)++;
 
 		if (advanced_bio)
 			bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
@@ -226,19 +227,13 @@ static int pblk_submit_read_list(struct pblk *pblk, struct bio *bio,
 			goto fail_meta_free;
 		}
 
-		ret = pblk_read_ppalist_rq_list(pblk, bio, rqd, lba_list,
-						nr_secs, &valid_secs, flags,
+		pblk_read_ppalist_rq_list(pblk, bio, rqd, lba_list, nr_secs,
+						&valid_secs, flags,
 						&read_bitmap);
-		if (ret)
-			goto fail_ppa_free;
 	} else {
-		ret = pblk_read_rq(pblk, bio, rqd, lba_list[0], flags,
-								&read_bitmap);
-		if (ret)
-			goto fail_meta_free;
+		pblk_read_rq(pblk, bio, rqd, lba_list[0], flags, &read_bitmap);
 	}
 
-	bio_get(bio);
 	rqd->opcode = NVM_OP_PREAD;
 	rqd->bio = bio;
 	rqd->ins = &pblk->instance;
@@ -250,8 +245,6 @@ static int pblk_submit_read_list(struct pblk *pblk, struct bio *bio,
 #endif
 
 	if (bitmap_full(&read_bitmap, valid_secs)) {
-		bio_endio(bio);
-		pblk_end_io(rqd);
 		return NVM_IO_OK;
 	} else if (bitmap_empty(&read_bitmap, valid_secs)) {
 #ifdef CONFIG_NVM_DEBUG
@@ -391,7 +384,7 @@ int pblk_gc_move_valid_pages(struct pblk *pblk, struct pblk_block *rblk,
 		rqd = mempool_alloc(pblk->r_rq_pool, GFP_KERNEL);
 		if (!rqd) {
 			pr_err("pblk: could not allocate GC request\n");
-			goto fail_free_krefbuf;
+			goto fail_free_bio;
 		}
 		memset(rqd, 0, pblk_r_rq_size);
 
@@ -399,14 +392,13 @@ int pblk_gc_move_valid_pages(struct pblk *pblk, struct pblk_block *rblk,
 						secs_to_gc, secs_in_disk,
 						PBLK_IOTYPE_TEST);
 						/* secs_to_rec, PBLK_IOTYPE_SYNC); */
-		if (ret == NVM_IO_OK) {
-			wait_for_completion_io(&wait);
-		} else if (ret != NVM_IO_DONE) {
+		if (ret) {
 			pr_err("pblk: GC read request failed:%d\n", ret);
 			bio_put(bio);
 			goto fail_free_rqd;
 		}
 
+		wait_for_completion_io(&wait);
 		pblk_free_gc_rqd(pblk, rqd);
 
 #ifdef CONFIG_NVM_DEBUG
@@ -415,13 +407,12 @@ int pblk_gc_move_valid_pages(struct pblk *pblk, struct pblk_block *rblk,
 #endif
 
 		bio_put(bio);
-		bio_reset(bio);
 
 		/* Write to buffer */
 		bio = bio_map_kern(q, data, bio_len, GFP_KERNEL);
 		if (!bio) {
 			pr_err("pblk: could not allocate GC bio\n");
-			goto fail_free_krefbuf;
+			goto fail_free_bio;
 		}
 
 		bio->bi_iter.bi_sector = 0; /* artificial bio */
@@ -435,7 +426,7 @@ write_retry:
 			goto write_retry;
 		}
 
-		bio_endio(bio);
+		bio_put(bio);
 
 next:
 		read_left -= secs_to_gc;
@@ -453,6 +444,8 @@ next:
 
 fail_free_rqd:
 	pblk_free_gc_rqd(pblk, rqd);
+fail_free_bio:
+	bio_put(bio);
 fail_free_krefbuf:
 	kfree(ref_buf);
 fail_free_data:
