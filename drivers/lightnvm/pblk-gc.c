@@ -245,6 +245,7 @@ static int pblk_submit_read_list(struct pblk *pblk, struct bio *bio,
 #endif
 
 	if (bitmap_full(&read_bitmap, valid_secs)) {
+		bio_endio(bio);
 		return NVM_IO_OK;
 	} else if (bitmap_empty(&read_bitmap, valid_secs)) {
 #ifdef CONFIG_NVM_DEBUG
