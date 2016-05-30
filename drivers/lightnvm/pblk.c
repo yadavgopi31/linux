@@ -1928,6 +1928,7 @@ fail_free_bio:
 fail_sync:
 	/* Fail is probably caused by a locked lba - kick the queue to avoid a
 	 * deadlock in the case that no new I/Os are coming in.
+	 * TODO: Look into this now that there it no locking
 	 */
 	pblk_write_kick(pblk);
 end_rollback:
