@@ -693,10 +693,11 @@ static int pblk_map_rr_page(struct pblk *pblk, unsigned int sentry,
 	int is_gc = 0; //TODO: Fix for now
 	int ret = 0;
 
+try_rr:
 	rlun = pblk_get_lun_rr(pblk, is_gc);
 	lun = rlun->parent;
 
-try:
+try_lun:
 	/* TODO: This should follow a richer heuristic */
 	if (lun->nr_free_blocks < pblk->nr_luns * 4) {
 		//XXX: Other?
@@ -708,13 +709,12 @@ try:
 	spin_lock(&rlun->lock);
 	rblk = rlun->cur;
 
-	/* In the case of a grown bad block, the assigned LUN might be
-	 * recovering, i.e., retiring the bad block and setting a new one. Skip
-	 * this block in this unusual case.
+	/* In case the block for the current LUN is being replaced, choose a
+	 * different LUN to map the incoming request.
 	 */
 	if (!rblk) {
 		spin_unlock(&rlun->lock);
-		goto try;
+		goto try_rr;
 	}
 
 	/* Account for grown bad blocks */
@@ -726,7 +726,7 @@ try:
 		if (ret)
 			goto out;
 
-		goto try;
+		goto try_lun;
 	}
 
 	ret = pblk_map_page(pblk, rblk, sentry, ppa_list, meta_list,
@@ -741,7 +741,7 @@ try:
 		if (ret)
 			goto out;
 
-		goto try;
+		goto try_lun;
 	}
 	spin_unlock(&rlun->lock);
 
