@@ -422,7 +422,8 @@ void pblk_end_sync_bio(struct bio *bio)
 	struct completion *waiting = bio->bi_private;
 
 	if (bio->bi_error)
-		pr_err("pblk: sync request failed (%u).\n", bio->bi_error);
+		pr_err_ratelimited("pblk: sync request failed (%u).\n",
+								bio->bi_error);
 
 	complete(waiting);
 }
