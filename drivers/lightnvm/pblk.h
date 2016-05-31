@@ -220,6 +220,7 @@ struct pblk_block {
 	unsigned long *invalid_secs;
 	/* Bitmap for free (0) / used sectors (1) in the block */
 	unsigned long *sectors;
+	unsigned long cur_sec;
 	/* number of secs that are invalid, wrt host page size */
 	unsigned int nr_invalid_secs;
 

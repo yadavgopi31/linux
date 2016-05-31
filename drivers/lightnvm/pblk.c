@@ -86,18 +86,6 @@ static void pblk_discard(struct pblk *pblk, struct bio *bio)
 	pblk_invalidate_range(pblk, slba, nr_secs);
 }
 
-static inline u64 pblk_next_free_sec(struct pblk *pblk, struct pblk_block *rblk)
-{
-	u64 free_sec;
-
-	lockdep_assert_held(&rblk->lock);
-
-	free_sec = find_first_zero_bit(rblk->sectors, pblk->nr_blk_dsecs);
-	WARN_ON(test_and_set_bit(free_sec, rblk->sectors));
-
-	return free_sec;
-}
-
 static inline u64 pblk_nr_free_secs(struct pblk *pblk, struct pblk_block *rblk)
 {
 	u64 free_secs = pblk->nr_blk_dsecs;
@@ -247,6 +235,7 @@ try:
 
 	blk->priv = rblk;
 	rblk->sectors = sector_bitmap;
+	rblk->cur_sec = 0;
 	rblk->sync_bitmap = sync_bitmap;
 	rblk->invalid_secs = invalid_secs;
 	rblk->nr_invalid_secs = 0;
@@ -411,6 +400,18 @@ static struct pblk_lun *pblk_get_lun_rr(struct pblk *pblk, int is_gc)
 	}
 
 	return max_free;
+}
+
+/* rblk->lock must be taken */
+static inline u64 pblk_next_free_sec(struct pblk *pblk, struct pblk_block *rblk)
+{
+#if CONFIG_NVM_DEBUG
+	BUG_ON(rblk->cur_sec > pblk->nr_blk_dsecs);
+#endif
+
+	WARN_ON(test_and_set_bit(rblk->cur_sec, rblk->sectors));
+
+	return rblk->cur_sec++;
 }
 
 static u64 pblk_alloc_addr(struct pblk *pblk, struct pblk_block *rblk)
