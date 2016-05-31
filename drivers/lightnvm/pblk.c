@@ -128,7 +128,6 @@ static void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk,
 
 static void pblk_free_blk(struct pblk_block *rblk)
 {
-	spin_lock(&rblk->lock);
 	if (rblk->sectors) {
 		kfree(rblk->sectors);
 		rblk->sectors = NULL;
@@ -141,7 +140,6 @@ static void pblk_free_blk(struct pblk_block *rblk)
 		kfree(rblk->invalid_secs);
 	if (rblk->rlpg)
 		kfree(rblk->rlpg);
-	spin_unlock(&rblk->lock);
 }
 
 static void pblk_free_blks(struct pblk *pblk)
@@ -160,7 +158,7 @@ static void pblk_free_blks(struct pblk *pblk)
 	}
 }
 
-static void __pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk)
+void pblk_put_blk_unlocked(struct pblk *pblk, struct pblk_block *rblk)
 {
 	nvm_put_blk(pblk->dev, rblk->parent);
 	list_del(&rblk->list);
@@ -172,7 +170,7 @@ void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk)
 	struct pblk_lun *rlun = rblk->rlun;
 
 	spin_lock(&rlun->lock_lists);
-	__pblk_put_blk(pblk, rblk);
+	pblk_put_blk_unlocked(pblk, rblk);
 	spin_unlock(&rlun->lock_lists);
 }
 
@@ -2244,7 +2242,7 @@ static void pblk_pad_open_blks(struct pblk *pblk)
 
 			/* empty block - no need for padding */
 			if (nr_free_secs == pblk->nr_blk_dsecs) {
-				__pblk_put_blk(pblk, rblk);
+				pblk_put_blk_unlocked(pblk, rblk);
 				continue;
 			}
 

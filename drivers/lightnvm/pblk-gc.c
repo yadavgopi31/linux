@@ -574,7 +574,9 @@ prepare_ppas:
 	if (total_moved < rblk->nr_invalid_secs)
 		goto next_lba_list;
 
+	spin_lock(&rblk->lock);
 	pblk_put_blk(pblk, rblk);
+	spin_unlock(&rblk->lock);
 
 	kfree(recov_page);
 	return;
@@ -629,6 +631,9 @@ void pblk_lun_gc(struct work_struct *work)
 		nr_blocks_need--;
 	}
 	spin_unlock(&rlun->lock);
+
+	if (unlikely(!list_empty(&rlun->bb_list)))
+		pblk_recov_clean_bb_list(pblk, rlun);
 
 	/* TODO: Hint that request queue can be started again */
 }

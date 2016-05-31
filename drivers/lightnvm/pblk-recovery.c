@@ -39,10 +39,13 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 	int ret;
 
 	/* Prevent recovering a block that is being mapped by the writing
-	 * thread, even though we know it is a grown bad block.
+	 * thread, even though we know it is a grown bad block. Also, only set
+	 * for recovery those sectors that are synced to the media; entries
+	 * mapped to this bad block on the write buffer will be requeued within
+	 * the buffer itself. See pblk_rb_update_l2p
 	 */
 	spin_lock(&rblk->lock);
-	nr_entries = bitmap_weight(rblk->sectors, pblk->nr_blk_dsecs);
+	nr_entries = bitmap_weight(rblk->sync_bitmap, pblk->nr_blk_dsecs);
 
 	/* Recovery for this block already in progress */
 	if (nr_entries == 0) {
@@ -74,10 +77,6 @@ retry:
 	spin_lock(&rblk->rlun->lock_lists);
 	list_move_tail(&rblk->list, &rblk->rlun->bb_list);
 	spin_unlock(&rblk->rlun->lock_lists);
-
-	/*
-	 * TODO: Clean bb_list when doing GC
-	 */
 
 	mempool_free(blk_ws, pblk->blk_ws_pool);
 	return;
@@ -441,6 +440,23 @@ free_recov_page:
 	kfree(recov_page);
 out:
 	return ret;
+}
+
+void pblk_recov_clean_bb_list(struct pblk *pblk, struct pblk_lun *rlun)
+{
+	struct pblk_block *rblk, *trblk;
+
+	spin_lock(&rlun->lock_lists);
+	list_for_each_entry_safe(rblk, trblk, &rlun->bb_list, list) {
+		/* As sectors are recovered, the bitmap representing valid
+		 * mapped pages is emptied
+		 */
+		spin_lock(&rblk->lock);
+		if (bitmap_empty(rblk->sectors, pblk->nr_blk_dsecs))
+			pblk_put_blk_unlocked(pblk, rblk);
+		spin_unlock(&rblk->lock);
+	}
+	spin_unlock(&rlun->lock_lists);
 }
 
 /*

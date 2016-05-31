@@ -25,6 +25,7 @@ int pblk_recov_read(struct pblk *pblk, struct pblk_block *rblk,
 		    void *recov_page, unsigned int page_size);
 u64 *pblk_recov_get_lba_list(struct pblk *pblk, void *recov_page);
 int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk);
+void pblk_recov_clean_bb_list(struct pblk *pblk, struct pblk_lun *rlun);
 void pblk_close_rblk_queue(struct work_struct *work);
 
 #endif
