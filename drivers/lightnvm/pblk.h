@@ -218,12 +218,12 @@ struct pblk_block {
 					 * the media
 					 */
 
-	/* Bitmap for invalid page entries */
-	unsigned long *invalid_pages;
-	/* Bitmap for free (0) / used pages (1) in the block */
-	unsigned long *pages;
-	/* number of pages that are invalid, wrt host page size */
-	unsigned int nr_invalid_pages;
+	/* Bitmap for invalid sector entries */
+	unsigned long *invalid_secs;
+	/* Bitmap for free (0) / used sectors (1) in the block */
+	unsigned long *sectors;
+	/* number of secs that are invalid, wrt host page size */
+	unsigned int nr_invalid_secs;
 
 	spinlock_t lock;
 };
@@ -284,7 +284,7 @@ struct pblk {
 	/* Write strategy variables. Move these into each for structure for each
 	 * strategy
 	 */
-	atomic_t next_lun; /* Whenever a page is written, this is updated
+	atomic_t next_lun; /* Whenever sector is written, this is updated
 			    * to point to the next write lun
 			    */
 
@@ -411,6 +411,7 @@ int pblk_alloc_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		    struct pblk_ctx *ctx, unsigned int nr_secs);
 int pblk_read_from_cache(struct pblk *pblk, struct bio *bio,
 			 struct ppa_addr ppa);
+void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk);
 void pblk_end_io(struct nvm_rq *rqd);
 void pblk_end_sync_bio(struct bio *bio);
 
@@ -562,8 +563,8 @@ static void pblk_page_invalidate(struct pblk *pblk, struct pblk_addr *a)
 #endif
 
 	block_ppa = pblk_gaddr_to_pg_offset(pblk->dev, a->ppa);
-	WARN_ON(test_and_set_bit(block_ppa, rblk->invalid_pages));
-	rblk->nr_invalid_pages++;
+	WARN_ON(test_and_set_bit(block_ppa, rblk->invalid_secs));
+	rblk->nr_invalid_secs++;
 }
 
 static inline void pblk_update_map(struct pblk *pblk, sector_t laddr,
@@ -602,7 +603,7 @@ static inline sector_t pblk_get_laddr(struct bio *bio)
 	return bio->bi_iter.bi_sector / NR_PHY_IN_LOG;
 }
 
-static inline unsigned int pblk_get_pages(struct bio *bio)
+static inline unsigned int pblk_get_secs(struct bio *bio)
 {
 	return  bio->bi_iter.bi_size / PBLK_EXPOSED_PAGE_SIZE;
 }
@@ -619,7 +620,7 @@ static inline int block_is_bad(struct pblk_block *rblk)
 
 static inline int block_is_full(struct pblk *pblk, struct pblk_block *rblk)
 {
-	return (bitmap_full(rblk->pages, pblk->nr_blk_dsecs));
+	return (bitmap_full(rblk->sectors, pblk->nr_blk_dsecs));
 }
 
 #endif /* PBLK_H_ */

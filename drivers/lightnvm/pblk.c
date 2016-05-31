@@ -92,8 +92,8 @@ static inline u64 pblk_next_free_sec(struct pblk *pblk, struct pblk_block *rblk)
 
 	lockdep_assert_held(&rblk->lock);
 
-	free_sec = find_first_zero_bit(rblk->pages, pblk->nr_blk_dsecs);
-	WARN_ON(test_and_set_bit(free_sec, rblk->pages));
+	free_sec = find_first_zero_bit(rblk->sectors, pblk->nr_blk_dsecs);
+	WARN_ON(test_and_set_bit(free_sec, rblk->sectors));
 
 	return free_sec;
 }
@@ -103,7 +103,7 @@ static inline u64 pblk_nr_free_secs(struct pblk *pblk, struct pblk_block *rblk)
 	u64 free_secs = pblk->nr_blk_dsecs;
 
 	spin_lock(&rblk->lock);
-	free_secs -= bitmap_weight(rblk->pages, pblk->nr_blk_dsecs);
+	free_secs -= bitmap_weight(rblk->sectors, pblk->nr_blk_dsecs);
 	spin_unlock(&rblk->lock);
 
 	return free_secs;
@@ -128,18 +128,20 @@ static void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk,
 
 static void pblk_free_blk(struct pblk_block *rblk)
 {
-	if (rblk->pages) {
-		kfree(rblk->pages);
-		rblk->pages = NULL;
+	spin_lock(&rblk->lock);
+	if (rblk->sectors) {
+		kfree(rblk->sectors);
+		rblk->sectors = NULL;
 	}
 	if (rblk->sync_bitmap) {
 		kfree(rblk->sync_bitmap);
 		rblk->sync_bitmap = NULL;
 	}
-	if (rblk->invalid_pages)
-		kfree(rblk->invalid_pages);
+	if (rblk->invalid_secs)
+		kfree(rblk->invalid_secs);
 	if (rblk->rlpg)
 		kfree(rblk->rlpg);
+	spin_unlock(&rblk->lock);
 }
 
 static void pblk_free_blks(struct pblk *pblk)
@@ -165,7 +167,7 @@ static void __pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk)
 	pblk_free_blk(rblk);
 }
 
-static void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk)
+void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk)
 {
 	struct pblk_lun *rlun = rblk->rlun;
 
@@ -196,7 +198,7 @@ static struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
 	struct nvm_block *blk;
 	struct pblk_block *rblk;
 	struct pblk_blk_rec_lpg *rlpg;
-	unsigned long *sync_bitmap, *page_bitmap, *invalid_pages;
+	unsigned long *sync_bitmap, *sector_bitmap, *invalid_secs;
 	int nr_entries = pblk->nr_blk_dsecs;
 	unsigned int rlpg_len, req_len;
 
@@ -207,17 +209,17 @@ static struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
 		return NULL;
 	}
 
-	page_bitmap = kzalloc(BITS_TO_LONGS(nr_entries) *
+	sector_bitmap = kzalloc(BITS_TO_LONGS(nr_entries) *
 					sizeof(unsigned long), GFP_KERNEL);
-	if (!page_bitmap) {
-		pr_err("pblk: cannot allocate page_bitmap for block\n");
+	if (!sector_bitmap) {
+		pr_err("pblk: cannot allocate sector_bitmap for block\n");
 		goto fail_alloc_page;
 	}
 
-	invalid_pages = kzalloc(BITS_TO_LONGS(nr_entries) *
+	invalid_secs = kzalloc(BITS_TO_LONGS(nr_entries) *
 					sizeof(unsigned long), GFP_KERNEL);
-	if (!invalid_pages) {
-		pr_err("pblk: cannot allocate invalid_pages for block\n");
+	if (!invalid_secs) {
+		pr_err("pblk: cannot allocate invalid_secs for block\n");
 		goto fail_alloc_invalid;
 	}
 
@@ -246,10 +248,10 @@ try:
 	rblk = pblk_get_rblk(rlun, blk->id);
 
 	blk->priv = rblk;
-	rblk->pages = page_bitmap;
+	rblk->sectors = sector_bitmap;
 	rblk->sync_bitmap = sync_bitmap;
-	rblk->invalid_pages = invalid_pages;
-	rblk->nr_invalid_pages = 0;
+	rblk->invalid_secs = invalid_secs;
+	rblk->nr_invalid_secs = 0;
 	rblk->rlpg = rlpg;
 
 	spin_lock(&rlun->lock_lists);
@@ -275,9 +277,9 @@ try:
 fail_get_blk:
 	kfree(rlpg);
 fail_alloc_rec:
-	kfree(invalid_pages);
+	kfree(invalid_secs);
 fail_alloc_invalid:
-	kfree(page_bitmap);
+	kfree(sector_bitmap);
 fail_alloc_page:
 	kfree(sync_bitmap);
 	return NULL;
@@ -434,7 +436,7 @@ static inline u64 pblk_current_pg(struct pblk *pblk, struct pblk_block *rblk)
 	int next_free_page;
 
 	spin_lock(&rblk->lock);
-	next_free_page = find_first_zero_bit(rblk->pages, pblk->nr_blk_dsecs);
+	next_free_page = find_first_zero_bit(rblk->sectors, pblk->nr_blk_dsecs);
 	spin_unlock(&rblk->lock);
 
 	return next_free_page;
@@ -840,7 +842,7 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 	}
 
 out:
-	ret = pblk_setup_rec_end_rq(pblk, ctx, recovery, comp_bits, c_entries);
+	ret = pblk_recov_setup_end_rq(pblk, ctx, recovery, comp_bits, c_entries);
 	if (ret)
 		pr_err("pblk: could not recover from write failure\n");
 
@@ -978,7 +980,7 @@ rollback:
 static int pblk_buffer_write(struct pblk *pblk, struct bio *bio,
 							unsigned long flags)
 {
-	uint8_t nr_secs = pblk_get_pages(bio);
+	uint8_t nr_secs = pblk_get_secs(bio);
 	int ret = NVM_IO_DONE;
 
 	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA)) {
@@ -1300,7 +1302,7 @@ static int __pblk_submit_read(struct pblk *pblk, struct bio *bio,
 {
 	struct pblk_r_ctx *r_ctx = nvm_rq_to_pdu(rqd);
 	unsigned long read_bitmap; /* Max 64 ppas per request */
-	uint8_t nr_secs = pblk_get_pages(bio);
+	uint8_t nr_secs = pblk_get_secs(bio);
 	int ret;
 
 	bitmap_zero(&read_bitmap, nr_secs);
@@ -2336,7 +2338,7 @@ static int pblk_blocks_init(struct pblk *pblk)
 		for (blk = 0; blk < pblk->dev->blks_per_lun; blk++) {
 			rblk = &rlun->blocks[blk];
 			/* XXX: Pending on mm recovery */
-			/* ret = pblk_scan_recover_blk(pblk, rblk); */
+			/* ret = pblk_recov_scan_blk(pblk, rblk); */
 			/* if (ret) { */
 				/* pr_err("nvm: pblk: could not recover l2p\n"); */
 				/* goto out; */
@@ -2528,13 +2530,32 @@ static void pblk_print_debug(void *private)
 					rblk->parent->id,
 					pblk->dev->sec_per_blk,
 					pblk->nr_blk_dsecs,
-					bitmap_weight(rblk->pages,
+					bitmap_weight(rblk->sectors,
 							pblk->dev->sec_per_blk),
 					bitmap_weight(rblk->sync_bitmap,
 							pblk->dev->sec_per_blk),
-					bitmap_weight(rblk->invalid_pages,
+					bitmap_weight(rblk->invalid_secs,
 							pblk->dev->sec_per_blk),
-					rblk->nr_invalid_pages);
+					rblk->nr_invalid_secs);
+			spin_unlock(&rblk->lock);
+		}
+
+		/* Print closed blocks */
+		list_for_each_entry(rblk, &rlun->closed_list, list) {
+			spin_lock(&rblk->lock);
+			if (rblk->sectors) {
+				pr_info("pblk:closed:\tblk:%lu\t%u\t%u\t%u\n",
+					rblk->parent->id,
+					bitmap_weight(rblk->sectors,
+							pblk->dev->sec_per_blk),
+					bitmap_weight(rblk->sectors,
+							pblk->dev->sec_per_blk),
+					bitmap_weight(rblk->invalid_secs,
+							pblk->dev->sec_per_blk));
+			} else {
+				pr_info("pblk:closed:\tblk:%lu\tFREE\n",
+					rblk->parent->id);
+			}
 			spin_unlock(&rblk->lock);
 		}
 
@@ -2543,10 +2564,11 @@ static void pblk_print_debug(void *private)
 			spin_lock(&rblk->lock);
 			pr_info("pblk:bad:\tblk:%lu\t%u\n",
 				rblk->parent->id,
-				bitmap_weight(rblk->pages,
+				bitmap_weight(rblk->sectors,
 						pblk->dev->sec_per_blk));
 			spin_unlock(&rblk->lock);
 		}
+
 		spin_unlock(&rlun->lock_lists);
 	}
 

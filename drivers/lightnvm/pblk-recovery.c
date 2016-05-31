@@ -42,7 +42,7 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 	 * thread, even though we know it is a grown bad block.
 	 */
 	spin_lock(&rblk->lock);
-	nr_entries = bitmap_weight(rblk->pages, pblk->nr_blk_dsecs);
+	nr_entries = bitmap_weight(rblk->sectors, pblk->nr_blk_dsecs);
 
 	/* Recovery for this block already in progress */
 	if (nr_entries == 0) {
@@ -51,14 +51,14 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 	}
 
 	/* Clear mapped pages as they are set for recovery */
-	off = find_first_bit(rblk->pages, pblk->nr_blk_dsecs);
-	bitmap_clear(rblk->pages, off, nr_entries);
+	off = find_first_bit(rblk->sectors, pblk->nr_blk_dsecs);
+	bitmap_clear(rblk->sectors, off, nr_entries);
 	spin_unlock(&rblk->lock);
 
 retry:
-	ret = pblk_gc_move_valid_pages(pblk, rblk, &lba_list[off], nr_entries);
+	ret = pblk_gc_move_valid_secs(pblk, rblk, &lba_list[off], nr_entries);
 	if (ret != nr_entries) {
-		pr_err("pblk: could not recover all pages:blk:%lu, "
+		pr_err("pblk: could not recover all sectors:blk:%lu, "
 						"recovered:%d/%d. Try:%d/%d\n",
 						rblk->parent->id,
 						ret, nr_entries,
@@ -227,7 +227,7 @@ void pblk_run_recovery(struct pblk *pblk, struct pblk_block *rblk)
 	queue_work(pblk->kgc_wq, &blk_ws->ws_blk);
 }
 
-int pblk_setup_rec_end_rq(struct pblk *pblk, struct pblk_ctx *ctx,
+int pblk_recov_setup_end_rq(struct pblk *pblk, struct pblk_ctx *ctx,
 			  struct pblk_rec_ctx *recovery, u64 *comp_bits,
 			  unsigned int c_entries)
 {
@@ -284,44 +284,24 @@ int pblk_setup_rec_end_rq(struct pblk *pblk, struct pblk_ctx *ctx,
 	return 0;
 }
 
-/*
- * Bring up & tear down scanning - These set of functions implement "last page
- * recovery". This is, saving the l2p mapping of each block on the last page to
- * be able to reconstruct the l2p table by scanning the last page of each block.
- * This mechanism triggers when l2p snapshot fails
- */
-
-/* Read last page on block and update l2p table if necessary */
-int pblk_scan_recover_blk(struct pblk *pblk, struct pblk_block *rblk)
+int pblk_recov_read(struct pblk *pblk, struct pblk_block *rblk,
+		    void *recov_page, unsigned int page_size)
 {
 	struct nvm_dev *dev = pblk->dev;
-	struct pblk_blk_rec_lpg *rlpg;
 	struct pblk_r_ctx *r_ctx;
 	struct nvm_rq *rqd;
 	struct bio *bio;
-	void *bio_data;
 	struct ppa_addr ppa_addr[PBLK_RECOVERY_SECTORS];
-	struct ppa_addr ppa;
-	u64 *lba_list;
-	u64 bppa, rppa;
-	u32 rlpg_len;
-	u32 crc = ~(u32)0;
-	unsigned int bio_len = dev->sec_per_pl * dev->sec_size;
+	u64 rppa;
 	int i;
 	int ret = 0;
 	DECLARE_COMPLETION_ONSTACK(wait);
 
-	bio_data = kzalloc(bio_len, GFP_KERNEL);
-	if (!bio_data) {
-		pr_err("pblk: could not allocate recovery ppa list\n");
-		return -1;
-	}
-
-	bio = bio_map_kern(dev->q, bio_data, bio_len, GFP_KERNEL);
+	bio = bio_map_kern(dev->q, recov_page, page_size, GFP_KERNEL);
 	if (!bio) {
 		pr_err("pblk: could not allocate recovery bio\n");
 		ret = -1;
-		goto free_bio_data;
+		goto out;
 	}
 
 	rqd = mempool_alloc(pblk->r_rq_pool, GFP_KERNEL);
@@ -373,23 +353,81 @@ int pblk_scan_recover_blk(struct pblk *pblk, struct pblk_block *rblk)
 	}
 	wait_for_completion_io(&wait);
 
-	rlpg = bio_data;
+free_rqd:
+	mempool_free(rqd, pblk->r_rq_pool);
+free_bio:
+	bio_put(bio);
+out:
+	return ret;
+}
 
+u64 *pblk_recov_get_lba_list(struct pblk *pblk, void *recov_page)
+{
+	struct pblk_blk_rec_lpg *rlpg;
+	u32 rlpg_len;
+	u32 crc = ~(u32)0;
+
+	rlpg = recov_page;
 	rlpg_len = sizeof(struct pblk_blk_rec_lpg) +
 					(pblk->nr_blk_dsecs * sizeof(u64));
 	crc = cpu_to_le32(crc32_le(crc, (unsigned char *)rlpg + sizeof(crc),
 						rlpg_len - sizeof(crc)));
 
-	if (rlpg->crc != crc || rlpg->status != PBLK_BLK_ST_CLOSED)
-		goto free_rqd;
+	if (rlpg->crc != crc || rlpg->status != PBLK_BLK_ST_CLOSED) {
+		pr_err("pbkl: Corrupted recovery page.\n");
+		return NULL;
+	}
 
-	bppa = global_addr(pblk, rblk, 0);
-	lba_list = pblk_rlpg_to_llba(rlpg);
+	return pblk_rlpg_to_llba(rlpg);
+}
+
+/*
+ * Bring up & tear down scanning - These set of functions implement "last page
+ * recovery". This is, saving the l2p mapping of each block on the last page to
+ * be able to reconstruct the l2p table by scanning the last page of each block.
+ * This mechanism triggers when l2p snapshot fails
+ */
+
+/* Read last page on block and update l2p table if necessary */
+int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk)
+{
+	struct nvm_dev *dev = pblk->dev;
+	void *recov_page;
+	struct ppa_addr ppa;
+	u64 *lba_list;
+	u64 bppa;
+	unsigned int page_size;
+	int i;
+	int ret = 0;
+
+	page_size = dev->sec_per_pl * dev->sec_size;
+	recov_page = kzalloc(page_size, GFP_KERNEL);
+	if (!recov_page) {
+		pr_err("pblk: could not allocate recovery ppa list\n");
+		ret = -1;
+		goto out;
+	}
+
+	ret = pblk_recov_read(pblk, rblk, recov_page, page_size);
+	if (ret) {
+		pr_err("pblk: could not recover last page. Blk:%lu\n",
+						rblk->parent->id);
+		goto free_recov_page;
+	}
+
+	lba_list = pblk_recov_get_lba_list(pblk, recov_page);
+	if (!lba_list) {
+		pr_err("pblk: Could not interpret recover page. Blk:%lu\n",
+							rblk->parent->id);
+		goto free_recov_page;
+	}
+
 	/* TODO: We need gennvm to give us back the blocks that we owe so that
 	 * we can bring up the data structures before we populate them
 	 *  - all bitmaps
 	 *  - GC
 	 */
+	bppa = global_addr(pblk, rblk, 0);
 	for (i = 0; i < pblk->nr_blk_dsecs; i++) {
 		ppa = addr_to_ppa(bppa + i);
 		if (lba_list[i] != ADDR_EMPTY)
@@ -397,13 +435,9 @@ int pblk_scan_recover_blk(struct pblk *pblk, struct pblk_block *rblk)
 		/*else - mark as invalid */
 	}
 
-free_rqd:
-	mempool_free(rqd, pblk->r_rq_pool);
-free_bio:
-	bio_put(bio);
-free_bio_data:
-	kfree(bio_data);
-
+free_recov_page:
+	kfree(recov_page);
+out:
 	return ret;
 }
 

@@ -16,6 +16,8 @@
  */
 
 #include "pblk.h"
+#include "pblk-gc.h"
+#include "pblk-recovery.h"
 
 extern unsigned long pblk_r_rq_size, pblk_w_rq_size;
 
@@ -286,16 +288,16 @@ fail_meta_free:
 }
 
 /*
- * pblk_move_valid_pages -- migrate live data off the block
+ * pblk_move_valid_secs -- migrate live data off the block
  * @pblk: the 'pblk' structure
- * @block: the block from which to migrate live pages
+ * @block: the block from which to migrate live sectors
  *
  * Description:
  *   GC algorithms may call this function to migrate remaining live
  *   pages off the block prior to erasing it. This function blocks
  *   further execution until the operation is complete.
  */
-int pblk_gc_move_valid_pages(struct pblk *pblk, struct pblk_block *rblk,
+int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
 			     u64 *lba_list, unsigned int nr_entries)
 {
 	struct nvm_dev *dev = pblk->dev;
@@ -483,10 +485,10 @@ void pblk_gc_queue(struct work_struct *work)
 static struct pblk_block *rblock_max_invalid(struct pblk_block *ra,
 							struct pblk_block *rb)
 {
-	if (ra->nr_invalid_pages == rb->nr_invalid_pages)
+	if (ra->nr_invalid_secs == rb->nr_invalid_secs)
 		return ra;
 
-	return (ra->nr_invalid_pages < rb->nr_invalid_pages) ? rb : ra;
+	return (ra->nr_invalid_secs < rb->nr_invalid_secs) ? rb : ra;
 }
 
 /* linearly find the block with highest number of invalid pages
@@ -511,26 +513,76 @@ static void pblk_block_gc(struct work_struct *work)
 	struct pblk_block_ws *blk_ws = container_of(work, struct pblk_block_ws,
 									ws_blk);
 	struct pblk *pblk = blk_ws->pblk;
+	struct nvm_dev *dev = pblk->dev;
 	struct pblk_block *rblk = blk_ws->rblk;
 	struct pblk_lun *rlun = rblk->rlun;
-	/* struct nvm_dev *dev = pblk->dev; */
-
-	// XXX: Prevent GC from running for now
-	return;
+	void *recov_page;
+	u64 *lba_list;
+	u64 gc_lba_list[PBLK_MAX_REQ_ADDRS];
+	unsigned int page_size = dev->sec_per_pl * dev->sec_size;
+	int bit;
+	int nr_ppas;
+	int moved, total_moved = 0;
 
 	mempool_free(blk_ws, pblk->blk_ws_pool);
 	pr_debug("pblk: block '%lu' being reclaimed\n", rblk->parent->id);
 
-	/* if (pblk_move_valid_pages(pblk, rblk)) */
-		/* goto put_back; */
+	recov_page = kzalloc(page_size, GFP_KERNEL);
+	if (!recov_page) {
+		pr_err("pblk: could not allocate recovery ppa list\n");
+		goto put_back;
+	}
 
-	/* if (nvm_erase_blk(dev, rblk->parent)) */
-		/* goto put_back; */
+	if (pblk_recov_read(pblk, rblk, recov_page, page_size)) {
+		pr_err("pblk: could not recover last page. Blk:%lu\n",
+						rblk->parent->id);
+		goto free_recov_page;
+	}
 
-	/* pblk_put_blk(pblk, rblk); */
+	lba_list = pblk_recov_get_lba_list(pblk, recov_page);
+	if (!lba_list) {
+		pr_err("pblk: Could not interpret recover page. Blk:%lu\n",
+							rblk->parent->id);
+		goto free_recov_page;
+	}
+
+	bit = 0;
+next_lba_list:
+	nr_ppas = 0;
+	do {
+		bit = find_next_bit(rblk->invalid_secs,
+						pblk->nr_blk_dsecs, bit);
+		gc_lba_list[nr_ppas] = lba_list[bit];
+
+		bit++;
+		if (bit > pblk->nr_blk_dsecs)
+			goto prepare_ppas;
+
+		nr_ppas++;
+	} while (nr_ppas < PBLK_MAX_REQ_ADDRS);
+
+prepare_ppas:
+	moved = pblk_gc_move_valid_secs(pblk, rblk, gc_lba_list, nr_ppas);
+	if (moved != nr_ppas) {
+		pr_err("pblk: could not GC all sectors:blk:%lu, GC:%d/%d/%d\n",
+						rblk->parent->id,
+						moved, nr_ppas,
+						rblk->nr_invalid_secs);
+		goto put_back;
+	}
+
+	total_moved += moved;
+	if (total_moved < rblk->nr_invalid_secs)
+		goto next_lba_list;
+
+	pblk_put_blk(pblk, rblk);
+
+	kfree(recov_page);
 	return;
 
-/* put_back: */
+free_recov_page:
+	kfree(recov_page);
+put_back:
 	spin_lock(&rlun->lock);
 	list_add_tail(&rblk->prio, &rlun->prio_list);
 	spin_unlock(&rlun->lock);
@@ -544,9 +596,6 @@ void pblk_lun_gc(struct work_struct *work)
 	struct pblk_block_ws *blk_ws;
 	unsigned int nr_blocks_need;
 
-	/* JAVIER: TO GO when enabling GC */
-	return;
-
 	nr_blocks_need = pblk->nr_luns *
 				(pblk->dev->blks_per_lun / GC_LIMIT_INVERSE);
 
@@ -559,7 +608,7 @@ void pblk_lun_gc(struct work_struct *work)
 		struct pblk_block *rblk = block_prio_find_max(rlun);
 		struct nvm_block *block = rblk->parent;
 
-		if (!rblk->nr_invalid_pages)
+		if (!rblk->nr_invalid_secs)
 			break;
 
 		blk_ws = mempool_alloc(pblk->blk_ws_pool, GFP_ATOMIC);
@@ -569,9 +618,6 @@ void pblk_lun_gc(struct work_struct *work)
 		list_del_init(&rblk->prio);
 
 		BUG_ON(!block_is_full(pblk, rblk));
-
-		/* We can free page bitmap at this point */
-		kfree(rblk->pages);
 
 		pr_debug("pblk: selected block '%lu' for GC\n", block->id);
 
