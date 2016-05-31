@@ -393,8 +393,7 @@ int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
 
 		ret = pblk_submit_read_list(pblk, bio, rqd, &lba_list[off],
 						secs_to_gc, secs_in_disk,
-						PBLK_IOTYPE_TEST);
-						/* secs_to_rec, PBLK_IOTYPE_SYNC); */
+						PBLK_IOTYPE_SYNC);
 		if (ret) {
 			pr_err("pblk: GC read request failed:%d\n", ret);
 			bio_put(bio);

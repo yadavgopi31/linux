@@ -349,10 +349,12 @@ int pblk_recov_read(struct pblk *pblk, struct pblk_block *rblk,
 		pr_err("pblk: I/O submission failed\n");
 		ret = -1;
 		nvm_free_rqd_ppalist(dev, rqd);
-		goto free_rqd;
+		goto free_ppa_list;
 	}
 	wait_for_completion_io(&wait);
 
+free_ppa_list:
+	nvm_free_rqd_ppalist(dev, rqd);
 free_rqd:
 	mempool_free(rqd, pblk->r_rq_pool);
 free_bio:

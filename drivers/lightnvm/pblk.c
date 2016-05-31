@@ -874,7 +874,7 @@ static void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd,
 	struct pblk_r_ctx *r_ctx = nvm_rq_to_pdu(rqd);
 	struct bio *bio = rqd->bio;
 
-	if (r_ctx->flags & PBLK_IOTYPE_TEST)
+	if (r_ctx->flags & PBLK_IOTYPE_SYNC)
 		return;
 
 	if (nr_secs > 1)
@@ -882,9 +882,6 @@ static void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd,
 
 	if (rqd->meta_list)
 		nvm_dev_dma_free(pblk->dev, rqd->meta_list, rqd->dma_meta_list);
-
-	if (r_ctx->flags & PBLK_IOTYPE_SYNC)
-		return;
 
 	bio_put(bio);
 	mempool_free(rqd, pblk->r_rq_pool);
@@ -1223,7 +1220,7 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 	new_bio->bi_end_io = pblk_end_sync_bio;
 
 	flags = r_ctx->flags;
-	r_ctx->flags |= PBLK_IOTYPE_TEST;
+	r_ctx->flags |= PBLK_IOTYPE_SYNC;
 	rqd->bio = new_bio;
 	rqd->nr_ppas = nr_holes;
 
