@@ -621,7 +621,13 @@ static inline int block_is_bad(struct pblk_block *rblk)
 
 static inline int block_is_full(struct pblk *pblk, struct pblk_block *rblk)
 {
-	return (bitmap_full(rblk->sectors, pblk->nr_blk_dsecs));
+#ifdef CONFIG_NVM_DEBUG
+	if (!block_is_bad(rblk))
+		BUG_ON(!bitmap_full(rblk->sectors, pblk->nr_blk_dsecs) &&
+				rblk->cur_sec >= pblk->nr_blk_dsecs);
+#endif
+
+	return (rblk->cur_sec >= pblk->nr_blk_dsecs);
 }
 
 #endif /* PBLK_H_ */

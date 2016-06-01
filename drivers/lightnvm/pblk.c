@@ -417,7 +417,7 @@ static struct pblk_lun *pblk_get_lun_rr(struct pblk *pblk, int is_gc)
 static inline u64 pblk_next_free_sec(struct pblk *pblk, struct pblk_block *rblk)
 {
 #if CONFIG_NVM_DEBUG
-	BUG_ON(rblk->cur_sec > pblk->nr_blk_dsecs);
+	BUG_ON(rblk->cur_sec >= pblk->nr_blk_dsecs);
 #endif
 
 	WARN_ON(test_and_set_bit(rblk->cur_sec, rblk->sectors));
@@ -475,8 +475,9 @@ static int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 			 * page write at this point. We get a new block for this
 			 * LUN when the current block is full.
 			 */
-			pr_err("pblk: corrupted l2p mapping, blk:%lu\n",
-					rblk->parent->id);
+			pr_err("pblk: corrupted l2p mapping, blk:%lu,n:%d/%d\n",
+					rblk->parent->id,
+					i, nr_secs);
 			return -EINVAL;
 		}
 
@@ -575,10 +576,6 @@ try_lun:
 	ret = pblk_map_page(pblk, rblk, sentry, ppa_list, meta_list,
 							nr_secs, valid_secs);
 	if (ret) {
-		/* If mapping failed, there is not need to keep the reference.
-		 * Otherwise, maintain it to ensure that rblk is not freed
-		 * before completion (i.e., keep the reference).
-		 */
 		spin_unlock(&rlun->lock);
 		ret = pblk_replace_blk(pblk, rblk, rlun, 1);
 		if (ret)
