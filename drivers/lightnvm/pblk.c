@@ -162,6 +162,17 @@ void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk)
 	spin_unlock(&rlun->lock_lists);
 }
 
+/* Put block back to media manager but do not free rblk structures */
+void pblk_retire_blk(struct pblk *pblk, struct pblk_block *rblk)
+{
+	struct pblk_lun *rlun = rblk->rlun;
+
+	spin_lock(&rlun->lock_lists);
+	nvm_put_blk(pblk->dev, rblk->parent);
+	list_del(&rblk->list);
+	spin_unlock(&rlun->lock_lists);
+}
+
 static void pblk_put_blks(struct pblk *pblk)
 {
 	struct pblk_lun *rlun;
@@ -254,7 +265,7 @@ try:
 		/* Mark block as bad and return it to media manager */
 		ppa = pblk_ppa_to_gaddr(dev, block_to_addr(pblk, rblk));
 		nvm_mark_blk(dev, ppa, NVM_BLK_ST_BAD);
-		pblk_put_blk(pblk, rblk);
+		pblk_retire_blk(pblk, rblk);
 
 		goto try;
 	}
