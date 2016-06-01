@@ -560,8 +560,6 @@ void pblk_close_rblk_queue(struct work_struct *work)
 	if (likely(!block_is_bad(rblk)))
 		pblk_close_rblk(pblk, rblk);
 
-	kfree(rblk->sync_bitmap);
-	rblk->sync_bitmap = NULL;
 	mempool_free(blk_ws, pblk->blk_ws_pool);
 }
 
