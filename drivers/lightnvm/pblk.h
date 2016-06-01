@@ -114,6 +114,7 @@ struct pblk_ctx {
 /* Read context */
 struct pblk_r_ctx {
 	int flags;			/* Read context flags */
+	struct bio *orig_bio;
 };
 
 /* Recovery context */

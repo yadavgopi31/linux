@@ -883,6 +883,7 @@ static void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd,
 {
 	struct pblk_r_ctx *r_ctx = nvm_rq_to_pdu(rqd);
 	struct bio *bio = rqd->bio;
+	struct bio *orig_bio = r_ctx->orig_bio;
 
 	if (r_ctx->flags & PBLK_IOTYPE_SYNC)
 		return;
@@ -893,7 +894,19 @@ static void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd,
 	if (rqd->meta_list)
 		nvm_dev_dma_free(pblk->dev, rqd->meta_list, rqd->dma_meta_list);
 
+	/* TODO: Add this to statistics. Read retry module? */
+	if (bio->bi_error)
+		pr_err("pblk: read I/O failed\n");
+
 	bio_put(bio);
+	if (orig_bio) {
+#ifdef CONFIG_NVM_DEBUG
+		BUG_ON(orig_bio->bi_error);
+#endif
+		bio_endio(orig_bio);
+		bio_put(orig_bio);
+	}
+
 	mempool_free(rqd, pblk->r_rq_pool);
 
 #ifdef CONFIG_NVM_DEBUG
@@ -1359,15 +1372,28 @@ static int __pblk_submit_read(struct pblk *pblk, struct bio *bio,
 	} else if (bitmap_empty(&read_bitmap, nr_secs)) {
 #ifdef CONFIG_NVM_DEBUG
 		struct ppa_addr *ppa_list;
+		struct bio *int_bio;
 
 		ppa_list = (rqd->nr_ppas > 1) ? rqd->ppa_list : &rqd->ppa_addr;
 		if (nvm_boundary_checks(pblk->dev, ppa_list, rqd->nr_ppas))
 			BUG_ON(1);
 			/* WARN_ON(1); */
 #endif
-		ret = pblk_submit_read_io(pblk, bio, rqd, flags);
+
+		/* Clone read bio to deal with read errors internally */
+		int_bio = bio_clone_bioset(bio, GFP_KERNEL, fs_bio_set);
+		if (!int_bio) {
+			pr_err("pblk: could not clone read bio\n");
+			goto fail_ppa_free;
+		}
+
+		rqd->bio = int_bio;
+		r_ctx->orig_bio = bio;
+
+		ret = pblk_submit_read_io(pblk, int_bio, rqd, flags);
 		if (ret) {
 			pr_err("pblk: read IO submission failed\n");
+			bio_put(int_bio);
 			goto fail_ppa_free;
 		}
 
