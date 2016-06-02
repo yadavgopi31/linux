@@ -135,7 +135,7 @@ static void clean_wctx(struct pblk_w_ctx *w_ctx)
 
 #define pblk_rb_ring_count(head, tail, size) CIRC_CNT(head, tail, size)
 #define pblk_rb_ring_space(rb, head, tail, size) \
-	(CIRC_SPACE(head, tail, size) - rb->grace_area)
+					(CIRC_SPACE(head, tail, size))
 
 /* Buffer space is calculated with respect to the back pointer signaling
  * synchronized entries to the media.
@@ -167,13 +167,11 @@ unsigned long pblk_rb_count(struct pblk_rb *rb)
  */
 unsigned long pblk_rb_count_init(struct pblk_rb *rb)
 {
-	unsigned long mem = READ_ONCE(rb->mem);
-	unsigned long subm = READ_ONCE(rb->subm);
 	unsigned long ret;
 
 	spin_lock(&rb->r_lock);
 
-	ret = pblk_rb_ring_count(mem, subm, rb->nr_entries);
+	ret = pblk_rb_count(rb);
 	if (!ret)
 		spin_unlock(&rb->r_lock);
 	return ret;
@@ -518,7 +516,7 @@ unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct bio *bio,
 	mem = smp_load_acquire(&rb->mem);
 	subm = READ_ONCE(rb->subm);
 
-	if ((count = pblk_rb_ring_count(mem, subm, rb->nr_entries)) < nr_entries) {
+	if ((count = pblk_rb_count(rb)) < nr_entries) {
 		pad = nr_entries - count;
 		to_read = count;
 	}
