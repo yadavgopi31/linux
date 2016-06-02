@@ -760,8 +760,8 @@ int pblk_rb_tear_down_check(struct pblk_rb *rb)
 
 	spin_lock(&rb->w_lock);
 	spin_lock(&rb->r_lock);
-	spin_lock(&rb->s_lock);
 	spin_lock(&rb->l2p_lock);
+	spin_lock_irq(&rb->s_lock);
 
 	if ((rb->mem == rb->subm) && (rb->subm == rb->sync) &&
 				(rb->sync == rb->l2p_update) &&
@@ -777,8 +777,8 @@ int pblk_rb_tear_down_check(struct pblk_rb *rb)
 out:
 	spin_unlock(&rb->w_lock);
 	spin_unlock(&rb->r_lock);
-	spin_unlock(&rb->s_lock);
 	spin_unlock(&rb->l2p_lock);
+	spin_unlock_irq(&rb->s_lock);
 
 	return ret;
 }
