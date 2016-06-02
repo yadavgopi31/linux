@@ -2622,6 +2622,7 @@ static void pblk_print_debug(void *private)
 			spin_unlock(&rblk->lock);
 		}
 
+#if 0
 		/* Print closed blocks */
 		list_for_each_entry(rblk, &rlun->closed_list, list) {
 			spin_lock(&rblk->lock);
@@ -2640,6 +2641,7 @@ static void pblk_print_debug(void *private)
 			}
 			spin_unlock(&rblk->lock);
 		}
+#endif
 
 		/* Print grown bad blocks not yet retired */
 		list_for_each_entry(rblk, &rlun->bb_list, list) {
