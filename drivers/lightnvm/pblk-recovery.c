@@ -218,6 +218,8 @@ void pblk_run_recovery(struct pblk *pblk, struct pblk_block *rblk)
 		return;
 	}
 
+	pr_debug("Run recovery. Blk:%lu\n", rblk->parent->id);
+
 	blk_ws->pblk = pblk;
 	blk_ws->rblk = rblk;
 
