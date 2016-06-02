@@ -579,6 +579,40 @@ try_lun:
 
 		goto try_lun;
 	}
+
+#ifdef CONFIG_NVM_DEBUG
+	if (nvm_boundary_checks(pblk->dev, ppa_list, nr_secs)) {
+		u64 gaddr;
+		struct ppa_addr p;
+		int i;
+
+		printk(KERN_CRIT "FAIL: lun:%u,blk:%lu,n:%u,cur:%lu/%lu\n",
+				rlun->parent->id,
+				rblk->parent->id,
+				nr_secs,
+				rblk->cur_sec, rblk->cur_sec - nr_secs);
+
+		for (i = 0; i < nr_secs; i++) {
+			gaddr = global_addr(pblk, rblk,
+						rblk->cur_sec - nr_secs + i);
+			p = pblk_ppa_to_gaddr(pblk->dev, gaddr);
+			printk(KERN_CRIT "g:%llu,gen:%llu - ch:%u/%u,pl:%u/%u, "
+					"lun:%u/%u,blk:%u/%u,pg:%u/%u,sec:%u/%u\n",
+				gaddr,
+				p.ppa,
+				ppa_list[i].g.ch, p.g.ch,
+				ppa_list[i].g.pl, p.g.pl,
+				ppa_list[i].g.lun, p.g.lun,
+				ppa_list[i].g.blk, p.g.blk,
+				ppa_list[i].g.pg, p.g.pg,
+				ppa_list[i].g.sec, p.g.sec);
+		}
+
+		BUG_ON(1);
+	}
+		/* WARN_ON(1); */
+#endif
+
 	spin_unlock(&rlun->lock);
 
 	/* Prepare block for next write */
