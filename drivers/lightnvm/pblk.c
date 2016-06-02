@@ -506,6 +506,10 @@ static int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 			rlpg->nr_padded++;
 		}
 	}
+
+	/* A page mapping counts as one inflight I/O */
+	down(&pblk->inflight_sm);
+
 	spin_unlock(&rblk->lock);
 
 	return 0;
@@ -889,6 +893,10 @@ out:
 static void pblk_end_io_write(struct pblk *pblk, struct nvm_rq *rqd)
 {
 	struct pblk_ctx *ctx;
+	int i;
+
+	for (i = 0; i < rqd->nr_ppas; i += pblk->min_write_pgs)
+		up(&pblk->inflight_sm);
 
 	if (rqd->error == NVM_RSP_ERR_FAILWRITE)
 		return pblk_end_w_fail(pblk, rqd);
@@ -2483,6 +2491,8 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 
 	/* simple round-robin strategy */
 	atomic_set(&pblk->next_lun, -1);
+
+	sema_init(&pblk->inflight_sm, PBLK_MAX_INFLIGHT_IOS);
 
 #ifdef CONFIG_NVM_DEBUG
 	atomic_set(&pblk->inflight_writes, 0);

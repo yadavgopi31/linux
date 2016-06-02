@@ -37,6 +37,7 @@
 #define PBLK_SECTOR (512)
 #define PBLK_EXPOSED_PAGE_SIZE (4096)
 #define PBLK_MAX_REQ_ADDRS (64)
+#define PBLK_MAX_INFLIGHT_IOS (64)
 
 #define NR_PHY_IN_LOG (PBLK_EXPOSED_PAGE_SIZE / PBLK_SECTOR)
 
@@ -287,6 +288,8 @@ struct pblk {
 	atomic_t next_lun; /* Whenever sector is written, this is updated
 			    * to point to the next write lun
 			    */
+
+	struct semaphore inflight_sm;
 
 #ifdef CONFIG_NVM_DEBUG
 	/* All debug counters apply to 4kb sector I/Os */
