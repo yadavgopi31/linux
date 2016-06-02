@@ -847,9 +847,11 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 
 	c_entries = find_next_bit(comp_bits, nr_ppas, 0);
 
+#if CONFIG_NVM_DEBUG
 	/* Assume that all writes to a block have either succeeded or failed */
 	div_u64_rem(c_entries, pblk->min_write_pgs, &mod);
 	BUG_ON(mod);
+#endif
 
 	/* Replace all grown bad blocks on RR mapping scheme, mark them as bad
 	 * and return them to the media manager.
