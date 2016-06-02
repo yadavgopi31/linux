@@ -420,6 +420,34 @@ void pblk_end_sync_bio(struct bio *bio);
 void pblk_rb_print_debug(struct pblk_rb *rb);
 #endif
 
+static inline void pblk_print_failed_bio(struct nvm_rq *rqd, int nr_ppas)
+{
+	if (nr_ppas > 1) {
+		int bit = -1;
+
+		while ((bit = find_next_bit((void *)&rqd->ppa_status, nr_ppas,
+							bit + 1)) < nr_ppas) {
+			pr_err("\tbit:%d: ch:%d,pl:%d,lun:%d,blk:%d,pg:%d, "
+								"sec:%d\n",
+					bit,
+					rqd->ppa_list[bit].g.ch,
+					rqd->ppa_list[bit].g.pl,
+					rqd->ppa_list[bit].g.lun,
+					rqd->ppa_list[bit].g.blk,
+					rqd->ppa_list[bit].g.pg,
+					rqd->ppa_list[bit].g.sec);
+		}
+	} else {
+		pr_err("\tsingle: ch:%d,pl:%d,lun:%d,blk:%d,pg:%d, sec:%d\n",
+					rqd->ppa_addr.g.ch,
+					rqd->ppa_addr.g.pl,
+					rqd->ppa_addr.g.lun,
+					rqd->ppa_addr.g.blk,
+					rqd->ppa_addr.g.pg,
+					rqd->ppa_addr.g.sec);
+	}
+}
+
 static inline void pblk_write_kick(struct pblk *pblk)
 {
 	queue_work(pblk->kw_wq, &pblk->ws_writer);

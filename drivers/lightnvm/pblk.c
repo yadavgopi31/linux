@@ -362,10 +362,6 @@ void pblk_end_sync_bio(struct bio *bio)
 {
 	struct completion *waiting = bio->bi_private;
 
-	if (bio->bi_error)
-		pr_err_ratelimited("pblk: sync request failed (%u).\n",
-								bio->bi_error);
-
 	complete(waiting);
 }
 
@@ -892,8 +888,10 @@ static void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd,
 		nvm_dev_dma_free(pblk->dev, rqd->meta_list, rqd->dma_meta_list);
 
 	/* TODO: Add this to statistics. Read retry module? */
-	if (bio->bi_error)
-		pr_err("pblk: read I/O failed\n");
+	if (bio->bi_error) {
+		pr_err("pblk: read I/O failed. nr_ppas:%d. Failed:\n", nr_secs);
+		pblk_print_failed_bio(rqd, nr_secs);
+	}
 
 	bio_put(bio);
 	if (orig_bio) {
@@ -1264,6 +1262,11 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 
 	ret = pblk_submit_read_io(pblk, new_bio, rqd, r_ctx->flags);
 	wait_for_completion_io(&wait);
+
+	if (bio->bi_error) {
+		pr_err("pblk: partial sync read failed (%u)\n", bio->bi_error);
+		pblk_print_failed_bio(rqd, rqd->nr_ppas);
+	}
 
 	if (unlikely(nr_secs > 1 && nr_holes == 1)) {
 		rqd->ppa_list = ppa_ptr;
@@ -2169,6 +2172,9 @@ static void pblk_flush_writer(struct pblk *pblk)
 		wait_for_completion_io(&wait);
 	else if (ret != NVM_IO_DONE)
 		pr_err("pblk: tear down bio failed\n");
+
+	if (bio->bi_error)
+		pr_err("pblk: flush sync write failed (%u)\n", bio->bi_error);
 
 	bio_put(bio);
 }

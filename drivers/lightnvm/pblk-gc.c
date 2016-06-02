@@ -403,6 +403,12 @@ int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
 		wait_for_completion_io(&wait);
 		pblk_free_gc_rqd(pblk, rqd);
 
+		if (bio->bi_error) {
+			pr_err("pblk: GC sync read failed (%u)\n",
+								bio->bi_error);
+			pblk_print_failed_bio(rqd, rqd->nr_ppas);
+		}
+
 #ifdef CONFIG_NVM_DEBUG
 	atomic_add(secs_to_gc, &pblk->sync_reads);
 	atomic_sub(secs_to_gc, &pblk->inflight_reads);
