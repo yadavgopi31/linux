@@ -506,10 +506,6 @@ static int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 			rlpg->nr_padded++;
 		}
 	}
-
-	/* A page mapping counts as one inflight I/O */
-	down(&pblk->inflight_sm);
-
 	spin_unlock(&rblk->lock);
 
 	return 0;
@@ -618,6 +614,9 @@ try_lun:
 #endif
 
 	spin_unlock(&rlun->lock);
+
+	/* A page mapping counts as one inflight I/O */
+	down(&pblk->ch_list[rlun->ch].ch_sm);
 
 	/* Prepare block for next write */
 	if (block_is_full(pblk, rblk)) {
@@ -895,10 +894,8 @@ out:
 static void pblk_end_io_write(struct pblk *pblk, struct nvm_rq *rqd)
 {
 	struct pblk_ctx *ctx;
-	int i;
 
-	for (i = 0; i < rqd->nr_ppas; i += pblk->min_write_pgs)
-		up(&pblk->inflight_sm);
+	pblk_ch_semas_up(pblk, rqd);
 
 	if (rqd->error == NVM_RSP_ERR_FAILWRITE)
 		return pblk_end_w_fail(pblk, rqd);
@@ -1707,6 +1704,9 @@ static int pblk_setup_pad_rq(struct pblk *pblk, struct pblk_block *rblk,
 								&meta[0], 1, 0);
 		spin_unlock(&rlun->lock);
 
+		/* A page mapping counts as one inflight I/O */
+		down(&pblk->ch_list[rlun->ch].ch_sm);
+
 		if (ret) {
 			/*
 			 * TODO:  There is no more available pages, we need to
@@ -1724,6 +1724,9 @@ static int pblk_setup_pad_rq(struct pblk *pblk, struct pblk_block *rblk,
 						&rqd->ppa_list[i],
 						&meta[i], min, 0);
 		spin_unlock(&rlun->lock);
+
+		/* A page mapping counts as one inflight I/O */
+		down(&pblk->ch_list[rlun->ch].ch_sm);
 
 		if (ret) {
 			/*
@@ -2076,6 +2079,7 @@ static void pblk_luns_free(struct pblk *pblk)
 	}
 
 	kfree(pblk->luns);
+	kfree(pblk->ch_list);
 }
 
 static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
@@ -2105,12 +2109,20 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 	if (!pblk->luns)
 		return -ENOMEM;
 
+	pblk->ch_list = kcalloc(dev->nr_chnls, sizeof(struct pblk_ch),
+								GFP_KERNEL);
+	if (!pblk->ch_list)
+		return -ENOMEM;
+
+	for (i = 0; i < dev->nr_chnls; i++)
+		sema_init(&pblk->ch_list[i].ch_sm, PBLK_MAX_CH_INFLIGHT_IOS);
+
 	/* 1:1 mapping */
 	for (i = 0; i < pblk->nr_luns; i++) {
 		/* Align lun list to the channel each lun belongs to */
-		int ch =  ((lun_begin + i) % pblk->dev->nr_chnls);
-		int lun_raw =  ((lun_begin + i) / pblk->dev->nr_chnls);
-		int lunid =  lun_raw + ch * pblk->dev->luns_per_chnl;
+		int ch =  ((lun_begin + i) % dev->nr_chnls);
+		int lun_raw =  ((lun_begin + i) / dev->nr_chnls);
+		int lunid =  lun_raw + ch * dev->luns_per_chnl;
 		struct nvm_lun *lun;
 
 		if (dev->mt->reserve_lun(dev, lunid)) {
@@ -2130,6 +2142,8 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 			ret = -ENOMEM;
 			goto err;
 		}
+
+		rlun->ch = ch;
 
 		for (j = 0; j < pblk->dev->blks_per_lun; j++) {
 			struct pblk_block *rblk = &rlun->blocks[j];
@@ -2493,8 +2507,6 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 
 	/* simple round-robin strategy */
 	atomic_set(&pblk->next_lun, -1);
-
-	sema_init(&pblk->inflight_sm, PBLK_MAX_INFLIGHT_IOS);
 
 #ifdef CONFIG_NVM_DEBUG
 	atomic_set(&pblk->inflight_writes, 0);

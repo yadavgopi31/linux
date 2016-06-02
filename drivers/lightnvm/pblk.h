@@ -37,7 +37,7 @@
 #define PBLK_SECTOR (512)
 #define PBLK_EXPOSED_PAGE_SIZE (4096)
 #define PBLK_MAX_REQ_ADDRS (64)
-#define PBLK_MAX_INFLIGHT_IOS (64)
+#define PBLK_MAX_CH_INFLIGHT_IOS (4)
 
 #define NR_PHY_IN_LOG (PBLK_EXPOSED_PAGE_SIZE / PBLK_SECTOR)
 
@@ -235,6 +235,8 @@ struct pblk_lun {
 	struct pblk_block *cur, *gc_cur;
 	struct pblk_block *blocks;	/* Reference to block allocation */
 
+	unsigned int ch;
+
 	struct list_head prio_list;	/* Blocks that may be GC'ed */
 	struct list_head open_list;	/* In-use open blocks. These are blocks
 					 * that can be both written to and read
@@ -255,6 +257,10 @@ struct pblk_lun {
 
 	spinlock_t lock_lists;
 	spinlock_t lock;
+};
+
+struct pblk_ch {
+	struct semaphore ch_sm;
 };
 
 struct pblk {
@@ -289,7 +295,7 @@ struct pblk {
 			    * to point to the next write lun
 			    */
 
-	struct semaphore inflight_sm;
+	struct pblk_ch *ch_list;
 
 #ifdef CONFIG_NVM_DEBUG
 	/* All debug counters apply to 4kb sector I/Os */
@@ -448,6 +454,24 @@ static inline void pblk_print_failed_bio(struct nvm_rq *rqd, int nr_ppas)
 					rqd->ppa_addr.g.blk,
 					rqd->ppa_addr.g.pg,
 					rqd->ppa_addr.g.sec);
+	}
+}
+
+static inline void pblk_ch_semas_up(struct pblk *pblk, struct nvm_rq *rqd)
+{
+	struct ppa_addr ppa;
+	int nr_ppas = rqd->nr_ppas;
+
+	if (nr_ppas > 1) {
+		int i;
+
+		for (i = 0; i < rqd->nr_ppas; i += pblk->min_write_pgs) {
+			ppa = dev_to_generic_addr(pblk->dev, rqd->ppa_list[i]);
+			up(&pblk->ch_list[ppa.g.ch].ch_sm);
+		}
+	} else {
+		ppa = dev_to_generic_addr(pblk->dev, rqd->ppa_addr);
+		up(&pblk->ch_list[ppa.g.ch].ch_sm);
 	}
 }
 

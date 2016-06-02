@@ -542,6 +542,8 @@ static void pblk_close_rblk(struct pblk *pblk, struct pblk_block *rblk)
 		/* WARN_ON(1); */
 #endif
 
+	down(&pblk->ch_list[rblk->rlun->ch].ch_sm);
+
 	if (nvm_submit_io(dev, rqd)) {
 		pr_err("pblk: I/O submission failed\n");
 		goto fail_submit;
