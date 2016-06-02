@@ -533,6 +533,7 @@ static int pblk_map_rr_page(struct pblk *pblk, unsigned int sentry,
 	int is_gc = 0; //TODO: Fix for now
 	int ret = 0;
 
+try_rr:
 	rlun = pblk_get_lun_rr(pblk, is_gc);
 	lun = rlun->parent;
 
@@ -553,8 +554,7 @@ try_lun:
 	 */
 	if (!rblk) {
 		spin_unlock(&rlun->lock);
-		schedule();
-		goto try_lun;
+		goto try_rr;
 	}
 
 	/* Account for grown bad blocks */
