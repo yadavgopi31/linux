@@ -439,8 +439,12 @@ int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk)
 	for (i = 0; i < pblk->nr_blk_dsecs; i++) {
 		ppa = pblk_ppa_to_gaddr(dev, bppa + i);
 		if (lba_list[i] != ADDR_EMPTY &&
-				!nvm_boundary_checks(dev, &ppa, 1))
+					!nvm_boundary_checks(dev, &ppa, 1)) {
+			if (pblk_init_blk(pblk, rblk, rblk->rlun))
+				goto free_recov_page;
+
 			pblk_update_map(pblk, lba_list[i], rblk, ppa);
+		}
 		/*else - mark as invalid */
 	}
 
