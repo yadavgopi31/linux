@@ -401,6 +401,12 @@ int pblk_rb_write_entry(struct pblk_rb *rb, void *data, struct pblk_w_ctx w_ctx,
 	memcpy_torb(rb, entry->data, data, size);
 	memcpy_wctx(&entry->w_ctx, &w_ctx);
 
+	/* REQ_FLUSH | REQ_FUA */
+	if (w_ctx.bio) {
+		smp_load_acquire(&rb->sync_point);
+		smp_store_release(&rb->sync_point, pos);
+	}
+
 out:
 	return ret;
 }
