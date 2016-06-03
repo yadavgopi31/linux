@@ -1092,10 +1092,18 @@ static ssize_t nvme_sysfs_reset(struct device *dev,
 }
 static DEVICE_ATTR(reset_controller, S_IWUSR, NULL, nvme_sysfs_reset);
 
+static struct nvme_ns *nvme_get_ns_from_dev(struct device *dev)
+{
+	if (dev->type->devnode)
+		return dev_to_disk(dev)->private_data;
+
+	return (container_of(dev, struct nvm_dev, dev))->private_data;
+}
+
 static ssize_t wwid_show(struct device *dev, struct device_attribute *attr,
 								char *buf)
 {
-	struct nvme_ns *ns = dev_to_disk(dev)->private_data;
+	struct nvme_ns *ns = nvme_get_ns_from_dev(dev);
 	struct nvme_ctrl *ctrl = ns->ctrl;
 	int serial_len = sizeof(ctrl->serial);
 	int model_len = sizeof(ctrl->model);
@@ -1119,7 +1127,7 @@ static DEVICE_ATTR(wwid, S_IRUGO, wwid_show, NULL);
 static ssize_t uuid_show(struct device *dev, struct device_attribute *attr,
 								char *buf)
 {
-	struct nvme_ns *ns = dev_to_disk(dev)->private_data;
+	struct nvme_ns *ns = nvme_get_ns_from_dev(dev);
 	return sprintf(buf, "%pU\n", ns->uuid);
 }
 static DEVICE_ATTR(uuid, S_IRUGO, uuid_show, NULL);
@@ -1127,7 +1135,7 @@ static DEVICE_ATTR(uuid, S_IRUGO, uuid_show, NULL);
 static ssize_t eui_show(struct device *dev, struct device_attribute *attr,
 								char *buf)
 {
-	struct nvme_ns *ns = dev_to_disk(dev)->private_data;
+	struct nvme_ns *ns = nvme_get_ns_from_dev(dev);
 	return sprintf(buf, "%8phd\n", ns->eui);
 }
 static DEVICE_ATTR(eui, S_IRUGO, eui_show, NULL);
@@ -1135,7 +1143,7 @@ static DEVICE_ATTR(eui, S_IRUGO, eui_show, NULL);
 static ssize_t nsid_show(struct device *dev, struct device_attribute *attr,
 								char *buf)
 {
-	struct nvme_ns *ns = dev_to_disk(dev)->private_data;
+	struct nvme_ns *ns = nvme_get_ns_from_dev(dev);
 	return sprintf(buf, "%d\n", ns->ns_id);
 }
 static DEVICE_ATTR(nsid, S_IRUGO, nsid_show, NULL);
@@ -1152,7 +1160,7 @@ static umode_t nvme_attrs_are_visible(struct kobject *kobj,
 		struct attribute *a, int n)
 {
 	struct device *dev = container_of(kobj, struct device, kobj);
-	struct nvme_ns *ns = dev_to_disk(dev)->private_data;
+	struct nvme_ns *ns = nvme_get_ns_from_dev(dev);
 
 	if (a == &dev_attr_uuid.attr) {
 		if (!memchr_inv(ns->uuid, 0, sizeof(ns->uuid)))
@@ -1277,6 +1285,9 @@ static void nvme_alloc_ns(struct nvme_ctrl *ctrl, unsigned nsid)
 								__func__);
 			goto out_free_id;
 		}
+		if (sysfs_create_group(&ns->ndev->dev.kobj, &nvme_ns_attr_group))
+			pr_warn("%s: failed to create sysfs group for identification\n",
+				ns->disk->disk_name);
 	} else {
 		disk = alloc_disk_node(0, node);
 		if (!disk)

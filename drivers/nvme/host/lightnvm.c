@@ -616,6 +616,7 @@ int nvme_nvm_register(struct nvme_ns *ns, char *disk_name, int node)
 	memcpy(dev->name, disk_name, DISK_NAME_LEN);
 	dev->ops = &nvme_nvm_dev_ops;
 	dev->parent_dev = ns->ctrl->device;
+	dev->private_data = ns;
 	ns->ndev = dev;
 
 	return nvm_register(dev);

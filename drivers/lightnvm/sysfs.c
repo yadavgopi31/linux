@@ -2,6 +2,7 @@
 #include <linux/lightnvm.h>
 #include <linux/miscdevice.h>
 #include <linux/kobject.h>
+#include <linux/blk-mq.h>
 
 #include "sysfs.h"
 
@@ -88,81 +89,41 @@ int nvm_sysfs_register_target(struct nvm_target *target)
 }
 
 /*
- * Functions and data structures for exposing
- * group-information of LightNVM enabled devices.
- *
- * NOTE: these are internal to sysfs.c and used by `nvm_sysfs_[un]register_dev`.
+ * Functions and data structures for exposing LightNVM enabled devices.
  */
 
-static void nvm_grp_release(struct kobject *kobj)
+static ssize_t nvm_dev_attr_show(struct device *dev,
+				 struct device_attribute *dattr, char *page)
 {
-	pr_debug("nvm/sysfs: called `nvm_grp_release`.\n");
+	struct nvm_dev *ndev = container_of(dev, struct nvm_dev, dev);
+	struct nvm_id *id = &ndev->identity;
+	struct nvm_id_group *grp = &id->groups[0];
+	struct attribute *attr = &dattr->attr;
 
-	/* This does nothing since `nvm_id_group` information is embedded inside
-	 * `nvm_dev`. Management of `nvm_id_group` is therefore handled by the
-	 * release of `nvm_dev_release`.
-	 */
-}
-
-#define NVM_GRP_ATTR_RO(_name)						\
-	static struct attribute nvm_grp_##_name##_attr = {		\
-	.name = __stringify(_name),					\
-	.mode = S_IRUGO							\
-	}
-
-#define NVM_GRP_ATTR_LIST(_name) (&nvm_grp_##_name##_attr)
-
-NVM_GRP_ATTR_RO(media_type);
-NVM_GRP_ATTR_RO(flash_media_type);
-NVM_GRP_ATTR_RO(num_channels);
-NVM_GRP_ATTR_RO(num_luns);
-NVM_GRP_ATTR_RO(num_planes);
-NVM_GRP_ATTR_RO(num_blocks);
-NVM_GRP_ATTR_RO(num_pages);
-NVM_GRP_ATTR_RO(page_size);
-NVM_GRP_ATTR_RO(hw_sector_size);
-NVM_GRP_ATTR_RO(oob_sector_size);
-NVM_GRP_ATTR_RO(read_typ);
-NVM_GRP_ATTR_RO(read_max);
-NVM_GRP_ATTR_RO(prog_typ);
-NVM_GRP_ATTR_RO(prog_max);
-NVM_GRP_ATTR_RO(erase_typ);
-NVM_GRP_ATTR_RO(erase_max);
-NVM_GRP_ATTR_RO(multiplane_modes);
-NVM_GRP_ATTR_RO(media_capabilities);
-NVM_GRP_ATTR_RO(channel_parallelism);
-
-static struct attribute *nvm_grp_default_attrs[] = {
-	NVM_GRP_ATTR_LIST(media_type),
-	NVM_GRP_ATTR_LIST(flash_media_type),
-	NVM_GRP_ATTR_LIST(num_channels),
-	NVM_GRP_ATTR_LIST(num_luns),
-	NVM_GRP_ATTR_LIST(num_planes),
-	NVM_GRP_ATTR_LIST(num_blocks),
-	NVM_GRP_ATTR_LIST(num_pages),
-	NVM_GRP_ATTR_LIST(page_size),
-	NVM_GRP_ATTR_LIST(hw_sector_size),
-	NVM_GRP_ATTR_LIST(oob_sector_size),
-	NVM_GRP_ATTR_LIST(read_typ),
-	NVM_GRP_ATTR_LIST(read_max),
-	NVM_GRP_ATTR_LIST(prog_typ),
-	NVM_GRP_ATTR_LIST(prog_max),
-	NVM_GRP_ATTR_LIST(erase_typ),
-	NVM_GRP_ATTR_LIST(erase_max),
-	NVM_GRP_ATTR_LIST(multiplane_modes),
-	NVM_GRP_ATTR_LIST(media_capabilities),
-	NVM_GRP_ATTR_LIST(channel_parallelism),
-	NULL,
-};
-
-static ssize_t nvm_grp_attr_show(struct kobject *kobj,
-			     struct attribute *attr,
-			     char *page)
-{
-	struct nvm_id_group *grp = container_of(kobj, struct nvm_id_group,
-						kobj);
-
-	if (strcmp(attr->name, "media_type") == 0) {		/* u8 */
+	if (strcmp(attr->name, "version") == 0) {
+		return scnprintf(page, PAGE_SIZE, "%u\n", id->ver_id);
+	} else if (strcmp(attr->name, "vendor_opcode") == 0) {
+		return scnprintf(page, PAGE_SIZE, "%u\n", id->vmnt);
+	} else if (strcmp(attr->name, "num_groups") == 0) {
+		return scnprintf(page, PAGE_SIZE, "%u\n", id->cgrps);
+	} else if (strcmp(attr->name, "capabilities") == 0) {
+		return scnprintf(page, PAGE_SIZE, "%u\n", id->cap);
+	} else if (strcmp(attr->name, "device_mode") == 0) {
+		return scnprintf(page, PAGE_SIZE, "%u\n", id->dom);
+	} else if (strcmp(attr->name, "media_manager") == 0) {
+		if (!ndev->mt)
+			return scnprintf(page, PAGE_SIZE, "%s\n", "none");
+		return scnprintf(page, PAGE_SIZE, "%s\n", ndev->mt->name);
+	} else if (strcmp(attr->name, "ppa_format") == 0) {
+		return scnprintf(page, PAGE_SIZE,
+			"0x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+			id->ppaf.ch_offset, id->ppaf.ch_len,
+			id->ppaf.lun_offset, id->ppaf.lun_len,
+			id->ppaf.pln_offset, id->ppaf.pln_len,
+			id->ppaf.blk_offset, id->ppaf.blk_len,
+			id->ppaf.pg_offset, id->ppaf.pg_len,
+			id->ppaf.sect_offset, id->ppaf.sect_len);
+	} else if (strcmp(attr->name, "media_type") == 0) {	/* u8 */
 		return scnprintf(page, PAGE_SIZE, "%u\n", grp->mtype);
 	} else if (strcmp(attr->name, "flash_media_type") == 0) {
 		return scnprintf(page, PAGE_SIZE, "%u\n", grp->fmtype);
@@ -201,76 +162,15 @@ static ssize_t nvm_grp_attr_show(struct kobject *kobj,
 	} else if (strcmp(attr->name, "channel_parallelism") == 0) {/* u16 */
 		return scnprintf(page, PAGE_SIZE, "%u\n", grp->cpar);
 	} else {
-		return scnprintf(page, PAGE_SIZE,
-				 "Unhandled attr(%s) in `nvm_grp_attr_show`\n",
+		return scnprintf(page,
+				 PAGE_SIZE,
+				 "Unhandled attr(%s) in `nvm_dev_attr_show`\n",
 				 attr->name);
 	}
 }
 
-static const struct sysfs_ops nvm_grp_sysfs_ops = {
-	.show	= nvm_grp_attr_show,
-};
-
-static struct kobj_type nvm_grp_ktype = {
-	.sysfs_ops	= &nvm_grp_sysfs_ops,
-	.default_attrs	= nvm_grp_default_attrs,
-	.release	= nvm_grp_release
-};
-
-void nvm_sysfs_unregister_grps(struct nvm_dev *dev)
-{
-	int i;
-
-	for (i = 0; i < dev->identity.cgrps; i++) {
-		kobject_del(&dev->identity.groups[i].kobj);
-		kobject_put(&dev->identity.groups[i].kobj);
-		kobject_put(&dev->kobj);
-	}
-}
-
-static int nvm_sysfs_register_grps(struct nvm_dev *dev)
-{
-	int i, ret;
-
-	for (i = 0; i < dev->identity.cgrps; i++) {
-		ret = kobject_init_and_add(&dev->identity.groups[i].kobj,
-					   &nvm_grp_ktype,
-					   kobject_get(&dev->kobj),
-					   "grp%u", i);
-		if (ret < 0) {
-			pr_err("nvm/sysfs: `_register_grps` failed(%d)\n", ret);
-			goto grps_error;
-		}
-
-		kobject_uevent(&dev->identity.groups[i].kobj, KOBJ_ADD);
-	}
-
-	return 0;
-
-grps_error:
-	kobject_put(&dev->identity.groups[i].kobj);	/* The failed grp*/
-	kobject_put(&dev->kobj);
-
-	for (i = i - 1; i > 0; i--) {			/* Successful grps */
-		kobject_del(&dev->identity.groups[i].kobj);
-		kobject_put(&dev->identity.groups[i].kobj);
-		kobject_put(&dev->kobj);
-	}
-
-	return ret;
-}
-
-/*
- * Functions and data structures for exposing LightNVM enabled devices.
- */
-
-#define NVM_DEV_ATTR_RO(_name)						\
-	static struct attribute nvm_dev_##_name##_attr = {		\
-	.name = __stringify(_name),					\
-	.mode = S_IRUGO							\
-	}
-
-#define NVM_DEV_ATTR_LIST(_name) (&nvm_dev_##_name##_attr)
+#define NVM_DEV_ATTR_RO(_name) 					\
+static DEVICE_ATTR(_name, S_IRUGO, nvm_dev_attr_show, NULL);
 
 NVM_DEV_ATTR_RO(version);
 NVM_DEV_ATTR_RO(vendor_opcode);
@@ -280,145 +180,117 @@ NVM_DEV_ATTR_RO(device_mode);
 NVM_DEV_ATTR_RO(ppa_format);
 NVM_DEV_ATTR_RO(media_manager);
 
-static struct attribute *nvm_dev_default_attrs[] = {
-	NVM_DEV_ATTR_LIST(version),
-	NVM_DEV_ATTR_LIST(vendor_opcode),
-	NVM_DEV_ATTR_LIST(num_groups),
-	NVM_DEV_ATTR_LIST(capabilities),
-	NVM_DEV_ATTR_LIST(device_mode),
-	NVM_DEV_ATTR_LIST(ppa_format),
-	NVM_DEV_ATTR_LIST(media_manager),
+NVM_DEV_ATTR_RO(media_type);
+NVM_DEV_ATTR_RO(flash_media_type);
+NVM_DEV_ATTR_RO(num_channels);
+NVM_DEV_ATTR_RO(num_luns);
+NVM_DEV_ATTR_RO(num_planes);
+NVM_DEV_ATTR_RO(num_blocks);
+NVM_DEV_ATTR_RO(num_pages);
+NVM_DEV_ATTR_RO(page_size);
+NVM_DEV_ATTR_RO(hw_sector_size);
+NVM_DEV_ATTR_RO(oob_sector_size);
+NVM_DEV_ATTR_RO(read_typ);
+NVM_DEV_ATTR_RO(read_max);
+NVM_DEV_ATTR_RO(prog_typ);
+NVM_DEV_ATTR_RO(prog_max);
+NVM_DEV_ATTR_RO(erase_typ);
+NVM_DEV_ATTR_RO(erase_max);
+NVM_DEV_ATTR_RO(multiplane_modes);
+NVM_DEV_ATTR_RO(media_capabilities);
+NVM_DEV_ATTR_RO(channel_parallelism);
+
+#define NVM_DEV_ATTR(_name) (dev_attr_##_name##)
+
+static struct attribute *nvm_dev_attrs[] = {
+	&dev_attr_version.attr,
+	&dev_attr_vendor_opcode.attr,
+	&dev_attr_num_groups.attr,
+	&dev_attr_capabilities.attr,
+	&dev_attr_device_mode.attr,
+	&dev_attr_media_manager.attr,
+
+	&dev_attr_ppa_format.attr,
+	&dev_attr_media_type.attr,
+	&dev_attr_flash_media_type.attr,
+	&dev_attr_num_channels.attr,
+	&dev_attr_num_luns.attr,
+	&dev_attr_num_planes.attr,
+	&dev_attr_num_blocks.attr,
+	&dev_attr_num_pages.attr,
+	&dev_attr_page_size.attr,
+	&dev_attr_hw_sector_size.attr,
+	&dev_attr_oob_sector_size.attr,
+	&dev_attr_read_typ.attr,
+	&dev_attr_read_max.attr,
+	&dev_attr_prog_typ.attr,
+	&dev_attr_prog_max.attr,
+	&dev_attr_erase_typ.attr,
+	&dev_attr_erase_max.attr,
+	&dev_attr_multiplane_modes.attr,
+	&dev_attr_media_capabilities.attr,
+	&dev_attr_channel_parallelism.attr,
 	NULL,
 };
 
-static ssize_t nvm_dev_attr_show(struct kobject *kobj, struct attribute *attr,
-				char *page)
-{
-	struct nvm_dev *dev = container_of(kobj, struct nvm_dev, kobj);
-	struct nvm_id *id = &dev->identity;
-
-	if (strcmp(attr->name, "version") == 0) {
-		return scnprintf(page, PAGE_SIZE, "%u\n", id->ver_id);
-	} else if (strcmp(attr->name, "vendor_opcode") == 0) {
-		return scnprintf(page, PAGE_SIZE, "%u\n", id->vmnt);
-	} else if (strcmp(attr->name, "num_groups") == 0) {
-		return scnprintf(page, PAGE_SIZE, "%u\n", id->cgrps);
-	} else if (strcmp(attr->name, "capabilities") == 0) {
-		return scnprintf(page, PAGE_SIZE, "%u\n", id->cap);
-	} else if (strcmp(attr->name, "device_mode") == 0) {
-		return scnprintf(page, PAGE_SIZE, "%u\n", id->dom);
-	} else if (strcmp(attr->name, "media_manager") == 0) {
-		if (!dev->mt)
-			return scnprintf(page, PAGE_SIZE, "%s\n", "none");
-		return scnprintf(page, PAGE_SIZE, "%s\n", dev->mt->name);
-	} else if (strcmp(attr->name, "ppa_format") == 0) {
-		return scnprintf(page, PAGE_SIZE,
-			"0x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-			id->ppaf.ch_offset, id->ppaf.ch_len,
-			id->ppaf.lun_offset, id->ppaf.lun_len,
-			id->ppaf.pln_offset, id->ppaf.pln_len,
-			id->ppaf.blk_offset, id->ppaf.blk_len,
-			id->ppaf.pg_offset, id->ppaf.pg_len,
-			id->ppaf.sect_offset, id->ppaf.sect_len);
-	} else {
-		return scnprintf(page,
-				 PAGE_SIZE,
-				 "Unhandled attr(%s) in `nvm_dev_attr_show`\n",
-				 attr->name);
-	}
-}
-
-static const struct sysfs_ops nvm_dev_sysfs_ops = {
-	.show	= nvm_dev_attr_show,
+static struct attribute_group nvm_dev_attr_group = {
+	.name = "lightnvm",
+	.attrs = nvm_dev_attrs,
 };
 
-static void nvm_dev_release(struct kobject *kobj)
+
+const static struct attribute_group *nvm_dev_attr_groups[] = {
+	&nvm_dev_attr_group,
+	NULL,
+};
+
+static void nvm_dev_release(struct device *dev)
 {
-	struct nvm_dev *dev = container_of(kobj, struct nvm_dev, kobj);
+	struct nvm_dev *ndev = container_of(dev, struct nvm_dev, dev);
 
 	pr_debug("nvm/sysfs: `nvm_dev_release`\n");
 
-	kfree(dev);
+	kfree(ndev);
 }
 
-static struct kobj_type nvm_dev_ktype = {
-	.sysfs_ops	= &nvm_dev_sysfs_ops,
-	.default_attrs	= nvm_dev_default_attrs,
-	.release	= nvm_dev_release
-};
-
-void nvm_sysfs_unregister_dev(struct nvm_dev *dev)
-{
-	nvm_sysfs_unregister_grps(dev);
-
-	kobject_del(&dev->kobj);
-	kobject_put(&dev->kobj);
-}
-
-static void nvm_release(struct device *dev)
-{
-/* fill in */
-}
-
-struct class nvm_class = {
-	.name		= "lightnvm",
-};
-
-static const struct attribute_group *nvm_attr_groups[] = {
-	NULL
-};
+static struct class *nvm_class;
 
 static struct device_type nvm_type = {
-	.name		= "nvm",
-	.groups		= nvm_attr_groups,
-	.release	= nvm_release,
+	.name		= "lightnvm",
+	.groups		= nvm_dev_attr_groups,
+	.release	= nvm_dev_release,
 };
 
 int nvm_sysfs_register_dev(struct nvm_dev *dev)
 {
-	int ret;
-
 	dev->dev.parent = dev->parent_dev;
 	dev_set_name(&dev->dev, "%s", dev->name);
-	dev->dev.class = &nvm_class;
+	dev->dev.class = dev->parent_dev->class;
 	dev->dev.type = &nvm_type;
 	device_initialize(&dev->dev);
 	device_add(&dev->dev);
 
-	ret = kobject_init_and_add(&dev->dev.kobj, &nvm_dev_ktype, NULL, "%s",
-				   dev->name);
-	if (ret < 0) {
-		pr_err("nvm/sysfs: `_register_dev` failed(%d).\n", ret);
-		kobject_put(&dev->kobj);
-		return ret;
-	}
-	kobject_uevent(&dev->kobj, KOBJ_ADD);
-
-	ret = nvm_sysfs_register_grps(dev);
-	if (ret < 0) {
-		pr_err("nvm/sysfs: `_register_dev` rolling back.");
-
-		kobject_del(&dev->kobj);
-		kobject_put(&dev->kobj);
-
-		return ret;
-	}
+	blk_mq_register_dev(&dev->dev, dev->q);
 
 	return 0;
 }
 
-/*
- * Functions for exposing LightNVM devices and targets in sysfs.
- *
- * They will reside as children of the given `miscdevice`.
- */
+void nvm_sysfs_unregister_dev(struct nvm_dev *dev)
+{
+
+}
 
 int nvm_sysfs_register(struct miscdevice *miscdev)
 {
+	nvm_class = class_create(THIS_MODULE, "lightnvm");
+	if (IS_ERR(nvm_class))
+		return -EINVAL;
+
 	targets = kset_create_and_add("targets", NULL,
 			kobject_get(&miscdev->this_device->kobj));
 	if (!targets) {
 		kobject_put(&miscdev->this_device->kobj);
+		class_destroy(nvm_class);
 		return -ENOMEM;
 	}
 
@@ -428,4 +300,5 @@ int nvm_sysfs_register(struct miscdevice *miscdev)
 void nvm_sysfs_unregister(struct miscdevice *miscdev)
 {
 	kset_unregister(targets);
+	class_destroy(nvm_class);
 }

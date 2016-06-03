@@ -179,8 +179,6 @@ struct nvm_id_group {
 	u16	cpar;
 
 	struct nvm_id_lp_tbl lptbl;
-
-	struct kobject kobj;
 };
 
 struct nvm_addr_format {
@@ -359,11 +357,10 @@ struct nvm_dev {
 	struct device dev;
 	struct device *parent_dev;
 	char name[DISK_NAME_LEN];
+	void *private_data;
 
 	struct mutex mlock;
 	spinlock_t lock;
-
-	struct kobject kobj;
 };
 
 static inline struct ppa_addr generic_to_dev_addr(struct nvm_dev *dev,
