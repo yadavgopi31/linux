@@ -71,7 +71,8 @@ static void pblk_invalidate_range(struct pblk *pblk, sector_t slba,
 	for (i = slba; i < slba + nr_secs; i++) {
 		struct pblk_addr *gp = &pblk->trans_map[i];
 
-		pblk_page_invalidate(pblk, gp);
+		if (gp->rblk)
+			pblk_page_invalidate(pblk, gp);
 		ppa_set_empty(&gp->ppa);
 		gp->rblk = NULL;
 	}
