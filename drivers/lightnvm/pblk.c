@@ -188,23 +188,20 @@ static void pblk_put_blks(struct pblk *pblk)
 	}
 }
 
-static struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
-							unsigned long flags)
+int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk,
+		  struct pblk_lun *rlun)
 {
 	struct nvm_dev *dev = pblk->dev;
-	struct nvm_lun *lun = rlun->parent;
-	struct nvm_block *blk;
-	struct pblk_block *rblk;
 	struct pblk_blk_rec_lpg *rlpg;
 	unsigned long *sync_bitmap, *sector_bitmap, *invalid_secs;
-	int nr_entries = pblk->nr_blk_dsecs;
 	unsigned int rlpg_len, req_len;
+	int nr_entries = pblk->nr_blk_dsecs;
 
 	sync_bitmap = kzalloc(BITS_TO_LONGS(nr_entries) *
 					sizeof(unsigned long), GFP_KERNEL);
 	if (!sync_bitmap) {
 		pr_err("pblk: cannot allocate sync_bitmap for block\n");
-		return NULL;
+		return -ENOMEM;
 	}
 
 	sector_bitmap = kzalloc(BITS_TO_LONGS(nr_entries) *
@@ -228,6 +225,7 @@ static struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
 		pr_err("pblk: cannot allocate recovery ppa list\n");
 		goto fail_alloc_rec;
 	}
+
 	rlpg->status = PBLK_BLK_ST_OPEN;
 	rlpg->rlpg_len = rlpg_len;
 	rlpg->req_len = req_len;
@@ -235,17 +233,6 @@ static struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
 	rlpg->nr_lbas = 0;
 	rlpg->nr_padded = 0;
 
-try:
-	blk = nvm_get_blk(pblk->dev, lun, flags);
-	if (!blk) {
-		pr_err("pblk: cannot get new block from media manager\n");
-		spin_unlock(&lun->lock);
-		goto fail_get_blk;
-	}
-
-	rblk = pblk_get_rblk(rlun, blk->id);
-
-	blk->priv = rblk;
 	rblk->sectors = sector_bitmap;
 	rblk->cur_sec = 0;
 	rblk->sync_bitmap = sync_bitmap;
@@ -256,6 +243,40 @@ try:
 	spin_lock(&rlun->lock_lists);
 	list_add_tail(&rblk->list, &rlun->open_list);
 	spin_unlock(&rlun->lock_lists);
+
+	return 0;
+
+fail_alloc_rec:
+	kfree(invalid_secs);
+fail_alloc_invalid:
+	kfree(sector_bitmap);
+fail_alloc_page:
+	kfree(sync_bitmap);
+
+	return -ENOMEM;
+}
+
+static struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
+							unsigned long flags)
+{
+	struct nvm_dev *dev = pblk->dev;
+	struct nvm_lun *lun = rlun->parent;
+	struct nvm_block *blk;
+	struct pblk_block *rblk;
+
+try:
+	blk = nvm_get_blk(pblk->dev, lun, flags);
+	if (!blk) {
+		pr_err("pblk: cannot get new block from media manager\n");
+		spin_unlock(&lun->lock);
+		goto fail_get_blk;
+	}
+
+	rblk = pblk_get_rblk(rlun, blk->id);
+	blk->priv = rblk;
+
+	if (pblk_init_blk(pblk, rblk, rlun))
+		goto fail_return_blk;
 
 	if (nvm_erase_blk(dev, rblk->parent)) {
 		struct ppa_addr ppa;
@@ -273,14 +294,9 @@ try:
 
 	return rblk;
 
+fail_return_blk:
+	nvm_put_blk(pblk->dev, rblk->parent);
 fail_get_blk:
-	kfree(rlpg);
-fail_alloc_rec:
-	kfree(invalid_secs);
-fail_alloc_invalid:
-	kfree(sector_bitmap);
-fail_alloc_page:
-	kfree(sync_bitmap);
 	return NULL;
 }
 
