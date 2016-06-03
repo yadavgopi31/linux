@@ -1933,11 +1933,11 @@ static int pblk_rwb_init(struct pblk *pblk)
 	nr_entries = pblk->nr_luns * dev->sec_per_blk;
 	data_size = nr_entries * dev->sec_size;
 
-	data_buffer = vmalloc(data_size);
+	data_buffer = vzalloc(data_size);
 	if (!data_buffer)
 		return -ENOMEM;
 
-	entries = vmalloc(nr_entries * sizeof(struct pblk_rb_entry));
+	entries = vzalloc(nr_entries * sizeof(struct pblk_rb_entry));
 	if (!entries) {
 		vfree(pblk->rwb.data);
 		return -ENOMEM;
