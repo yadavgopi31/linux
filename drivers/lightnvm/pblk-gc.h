@@ -31,7 +31,7 @@ static inline int pblk_gc_invalidate_sec(struct pblk_block *rblk,
 					 struct ppa_addr a)
 {
 	rblk->nr_invalid_secs++;
-	return test_and_set_bit(a.ppa, rblk->invalid_secs);
+	return test_and_set_bit(a.ppa, rblk->invalid_bitmap);
 }
 
 #endif

@@ -54,8 +54,8 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 	}
 
 	/* Clear mapped pages as they are set for recovery */
-	off = find_first_bit(rblk->sectors, pblk->nr_blk_dsecs);
-	bitmap_clear(rblk->sectors, off, nr_entries);
+	off = find_first_bit(rblk->sector_bitmap, pblk->nr_blk_dsecs);
+	bitmap_clear(rblk->sector_bitmap, off, nr_entries);
 	spin_unlock(&rblk->lock);
 
 retry:
@@ -381,12 +381,17 @@ u64 *pblk_recov_get_lba_list(struct pblk *pblk, void *recov_page)
 	crc = cpu_to_le32(crc32_le(crc, (unsigned char *)rlpg + sizeof(crc),
 						rlpg_len - sizeof(crc)));
 
-	if (rlpg->crc != crc || rlpg->status != PBLK_BLK_ST_CLOSED) {
-		pr_err("pbkl: Corrupted recovery page.\n");
+	if (rlpg->crc != crc || rlpg->status != PBLK_BLK_ST_CLOSED)
 		return NULL;
-	}
 
 	return pblk_rlpg_to_llba(rlpg);
+}
+
+static void pblk_recov_init(struct pblk *pblk, struct pblk_block *rblk,
+			    struct pblk_blk_rec_lpg *rlpg)
+{
+	rblk->nr_invalid_secs = rlpg->nr_invalid_secs;
+	pblk_rlpg_set_bitmaps(rlpg, rblk, pblk->nr_blk_dsecs);
 }
 
 /*
@@ -400,7 +405,7 @@ u64 *pblk_recov_get_lba_list(struct pblk *pblk, void *recov_page)
 int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk)
 {
 	struct nvm_dev *dev = pblk->dev;
-	void *recov_page;
+	struct pblk_blk_rec_lpg *recov_page;
 	struct ppa_addr ppa;
 	u64 *lba_list;
 	u64 bppa;
@@ -424,11 +429,8 @@ int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk)
 	}
 
 	lba_list = pblk_recov_get_lba_list(pblk, recov_page);
-	if (!lba_list) {
-		pr_err("pblk: Could not interpret recover page. Blk:%lu\n",
-							rblk->parent->id);
+	if (!lba_list)
 		goto free_recov_page;
-	}
 
 	/* TODO: We need gennvm to give us back the blocks that we owe so that
 	 * we can bring up the data structures before we populate them
@@ -443,7 +445,12 @@ int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk)
 			if (pblk_init_blk(pblk, rblk, rblk->rlun))
 				goto free_recov_page;
 
+			pblk_recov_init(pblk, rblk, recov_page);
 			pblk_update_map(pblk, lba_list[i], rblk, ppa);
+
+			spin_lock(&rblk->rlun->lock_lists);
+			list_add_tail(&rblk->list, &rblk->rlun->closed_list);
+			spin_unlock(&rblk->rlun->lock_lists);
 		}
 		/*else - mark as invalid */
 	}
@@ -464,7 +471,7 @@ void pblk_recov_clean_bb_list(struct pblk *pblk, struct pblk_lun *rlun)
 		 * mapped pages is emptied
 		 */
 		spin_lock(&rblk->lock);
-		if (bitmap_empty(rblk->sectors, pblk->nr_blk_dsecs))
+		if (bitmap_empty(rblk->sector_bitmap, pblk->nr_blk_dsecs))
 			pblk_put_blk_unlocked(pblk, rblk);
 		spin_unlock(&rblk->lock);
 	}
@@ -497,6 +504,7 @@ static void pblk_close_rblk(struct pblk *pblk, struct pblk_block *rblk)
 #endif
 
 	rblk->rlpg->status = PBLK_BLK_ST_CLOSED;
+	rblk->rlpg->nr_invalid_secs = rblk->nr_invalid_secs;
 	crc = crc32_le(crc, (unsigned char *)rblk->rlpg + sizeof(crc),
 					rblk->rlpg->rlpg_len - sizeof(crc));
 	rblk->rlpg->crc = cpu_to_le32(crc);

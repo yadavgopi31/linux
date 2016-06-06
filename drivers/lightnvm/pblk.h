@@ -195,6 +195,9 @@ struct pblk_rb {
 #define PBLK_RECOVERY_SECTORS 4
 /* Recovery stored in the last page of the block. A list of lbas (u64) is
  * allocated together with this structure to allow block recovery and GC.
+ * After this structure, we store the following block bitmaps on the last page:
+ * sector_bitmap, sync_bitmap and invalid_bitmap in this order.
+ *
  */
 struct pblk_blk_rec_lpg {
 	u32 crc;
@@ -203,6 +206,8 @@ struct pblk_blk_rec_lpg {
 	u32 req_len;
 	u32 nr_lbas;
 	u32 nr_padded;
+	u32 nr_invalid_secs;
+	u32 bitmap_len;
 };
 
 struct pblk_block {
@@ -213,15 +218,14 @@ struct pblk_block {
 
 	struct pblk_blk_rec_lpg *rlpg;
 
+	unsigned long *sector_bitmap;		/* Bitmap for free (0) / used sectors
+					 * (1) in the block
+					 */
 	unsigned long *sync_bitmap;	/* Bitmap representing physical
 					 * addresses that have been synced to
 					 * the media
 					 */
-
-	/* Bitmap for invalid sector entries */
-	unsigned long *invalid_secs;
-	/* Bitmap for free (0) / used sectors (1) in the block */
-	unsigned long *sectors;
+	unsigned long *invalid_bitmap;	/* Bitmap for invalid sector entries */
 	unsigned long cur_sec;
 	/* number of secs that are invalid, wrt host page size */
 	unsigned int nr_invalid_secs;
@@ -487,13 +491,28 @@ static inline void *pblk_rlpg_to_llba(struct pblk_blk_rec_lpg *lpg)
 	return lpg + 1;
 }
 
+static inline void pblk_rlpg_set_bitmaps(struct pblk_blk_rec_lpg *lpg,
+					 struct pblk_block *rblk,
+					 int nr_entries)
+{
+	u64 *lbas;
+	unsigned long *bitmaps;
+
+	lbas = pblk_rlpg_to_llba(lpg);
+	bitmaps = (void *)(lbas + nr_entries);
+
+	rblk->sector_bitmap = bitmaps;
+	rblk->sync_bitmap = rblk->sector_bitmap + lpg->bitmap_len;
+	rblk->invalid_bitmap = rblk->sync_bitmap + lpg->bitmap_len;
+}
+
 static inline struct pblk_ctx *pblk_set_ctx(struct pblk *pblk,
 							struct nvm_rq *rqd)
 {
 	struct pblk_ctx *c;
 
 	c = nvm_rq_to_pdu(rqd);
-	c->c_ctx = (void*)(c + 1);
+	c->c_ctx = (void *)(c + 1);
 
 	return c;
 }
@@ -621,7 +640,7 @@ static void pblk_page_invalidate(struct pblk *pblk, struct pblk_addr *a)
 #endif
 
 	block_ppa = pblk_gaddr_to_pg_offset(pblk->dev, a->ppa);
-	WARN_ON(test_and_set_bit(block_ppa, rblk->invalid_secs));
+	WARN_ON(test_and_set_bit(block_ppa, rblk->invalid_bitmap));
 	rblk->nr_invalid_secs++;
 }
 
@@ -680,7 +699,7 @@ static inline int block_is_full(struct pblk *pblk, struct pblk_block *rblk)
 {
 #ifdef CONFIG_NVM_DEBUG
 	if (!block_is_bad(rblk))
-		BUG_ON(!bitmap_full(rblk->sectors, pblk->nr_blk_dsecs) &&
+		BUG_ON(!bitmap_full(rblk->sector_bitmap, pblk->nr_blk_dsecs) &&
 				rblk->cur_sec >= pblk->nr_blk_dsecs);
 #endif
 

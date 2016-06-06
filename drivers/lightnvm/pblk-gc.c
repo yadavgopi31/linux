@@ -555,7 +555,7 @@ static void pblk_block_gc(struct work_struct *work)
 next_lba_list:
 	nr_ppas = 0;
 	do {
-		bit = find_next_bit(rblk->invalid_secs,
+		bit = find_next_bit(rblk->invalid_bitmap,
 						pblk->nr_blk_dsecs, bit);
 		gc_lba_list[nr_ppas] = lba_list[bit];
 
