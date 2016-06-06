@@ -87,7 +87,6 @@ out:
 static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
 			struct pblk_ctx *ctx, unsigned int nr_rec_secs)
 {
-	struct nvm_dev *dev = pblk->dev;
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 	unsigned int valid_secs = c_ctx->nr_valid;
 	unsigned int padded_secs = c_ctx->nr_padded;
@@ -134,7 +133,7 @@ static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
 	rqd->ppa_status = (u64)0;
 
 #ifdef CONFIG_NVM_DEBUG
-	if (nvm_boundary_checks(dev, rqd->ppa_list, rqd->nr_ppas))
+	if (nvm_boundary_checks(pblk->dev, rqd->ppa_list, rqd->nr_ppas))
 		BUG_ON(1);
 		/* WARN_ON(1); */
 #endif

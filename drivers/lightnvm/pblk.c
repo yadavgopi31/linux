@@ -396,7 +396,7 @@ static struct pblk_lun *pblk_get_lun_rr(struct pblk *pblk, int is_gc)
 /* rblk->lock must be taken */
 static inline u64 pblk_next_free_sec(struct pblk *pblk, struct pblk_block *rblk)
 {
-#if CONFIG_NVM_DEBUG
+#ifdef CONFIG_NVM_DEBUG
 	BUG_ON(rblk->cur_sec >= pblk->nr_blk_dsecs);
 #endif
 
@@ -798,7 +798,7 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 	struct ppa_addr ppa, prev_ppa;
 	unsigned int c_entries;
 	int nr_ppas = rqd->nr_ppas;
-	int bit, mod;
+	int bit;
 	int ret;
 
 	/* The last page of a block contains recovery metadata, if a block
@@ -830,12 +830,6 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 	INIT_LIST_HEAD(&recovery->failed);
 
 	c_entries = find_next_bit(comp_bits, nr_ppas, 0);
-
-#if CONFIG_NVM_DEBUG
-	/* Assume that all writes to a block have either succeeded or failed */
-	div_u64_rem(c_entries, pblk->min_write_pgs, &mod);
-	BUG_ON(mod);
-#endif
 
 	/* Replace all grown bad blocks on RR mapping scheme, mark them as bad
 	 * and return them to the media manager.
@@ -1235,8 +1229,8 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 	struct bio_vec src_bv, dst_bv;
 	void *src_p, *dst_p;
 	int nr_holes = nr_secs - bitmap_weight(read_bitmap, nr_secs);
-	void *ppa_ptr;
-	dma_addr_t dma_ppa_list;
+	void *ppa_ptr = NULL;
+	dma_addr_t dma_ppa_list = 0;
 	int hole;
 	int i;
 	int ret;
@@ -1400,9 +1394,9 @@ static int __pblk_submit_read(struct pblk *pblk, struct bio *bio,
 		pblk_end_io(rqd);
 		return NVM_IO_OK;
 	} else if (bitmap_empty(&read_bitmap, nr_secs)) {
+		struct bio *int_bio;
 #ifdef CONFIG_NVM_DEBUG
 		struct ppa_addr *ppa_list;
-		struct bio *int_bio;
 
 		ppa_list = (rqd->nr_ppas > 1) ? rqd->ppa_list : &rqd->ppa_addr;
 		if (nvm_boundary_checks(pblk->dev, ppa_list, rqd->nr_ppas))
@@ -1620,7 +1614,6 @@ int pblk_setup_w_multi(struct pblk *pblk, struct nvm_rq *rqd,
 static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 						struct pblk_ctx *ctx)
 {
-	struct nvm_dev *dev = pblk->dev;
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 	unsigned int valid_secs = c_ctx->nr_valid;
 	unsigned int padded_secs = c_ctx->nr_padded;
@@ -1650,7 +1643,7 @@ static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 	}
 
 #ifdef CONFIG_NVM_DEBUG
-	if (nvm_boundary_checks(dev, rqd->ppa_list, rqd->nr_ppas))
+	if (nvm_boundary_checks(pblk->dev, rqd->ppa_list, rqd->nr_ppas))
 		BUG_ON(1);
 		/* WARN_ON(1); */
 #endif
