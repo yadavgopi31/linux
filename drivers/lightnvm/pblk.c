@@ -178,8 +178,7 @@ static void pblk_put_blks(struct pblk *pblk)
 	}
 }
 
-int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk,
-		  struct pblk_lun *rlun)
+int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct pblk_blk_rec_lpg *rlpg;
@@ -217,10 +216,6 @@ int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk,
 	rblk->nr_invalid_secs = 0;
 	rblk->rlpg = rlpg;
 
-	spin_lock(&rlun->lock_lists);
-	list_add_tail(&rblk->list, &rlun->open_list);
-	spin_unlock(&rlun->lock_lists);
-
 	return 0;
 }
 
@@ -243,8 +238,12 @@ try:
 	rblk = pblk_get_rblk(rlun, blk->id);
 	blk->priv = rblk;
 
-	if (pblk_init_blk(pblk, rblk, rlun))
+	if (pblk_init_blk(pblk, rblk))
 		goto fail_return_blk;
+
+	spin_lock(&rlun->lock_lists);
+	list_add_tail(&rblk->list, &rlun->open_list);
+	spin_unlock(&rlun->lock_lists);
 
 	if (nvm_erase_blk(dev, rblk->parent)) {
 		struct ppa_addr ppa;

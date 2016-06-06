@@ -372,12 +372,15 @@ out:
 u64 *pblk_recov_get_lba_list(struct pblk *pblk, void *recov_page)
 {
 	struct pblk_blk_rec_lpg *rlpg;
-	u32 rlpg_len;
+	u32 rlpg_len, bitmap_len;
 	u32 crc = ~(u32)0;
+	int nr_bitmaps = 3; /* sectors, sync, invalid */
 
 	rlpg = recov_page;
+	bitmap_len = BITS_TO_LONGS(pblk->nr_blk_dsecs);
 	rlpg_len = sizeof(struct pblk_blk_rec_lpg) +
-					(pblk->nr_blk_dsecs * sizeof(u64));
+			(pblk->nr_blk_dsecs * sizeof(u64)) +
+			(nr_bitmaps * bitmap_len * sizeof(unsigned long));
 	crc = cpu_to_le32(crc32_le(crc, (unsigned char *)rlpg + sizeof(crc),
 						rlpg_len - sizeof(crc)));
 
@@ -390,8 +393,7 @@ u64 *pblk_recov_get_lba_list(struct pblk *pblk, void *recov_page)
 static void pblk_recov_init(struct pblk *pblk, struct pblk_block *rblk,
 			    struct pblk_blk_rec_lpg *rlpg)
 {
-	rblk->nr_invalid_secs = rlpg->nr_invalid_secs;
-	pblk_rlpg_set_bitmaps(rlpg, rblk, pblk->nr_blk_dsecs);
+	memcpy(rblk->rlpg, rlpg, rlpg->rlpg_len);
 }
 
 /*
@@ -437,20 +439,21 @@ int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk)
 	 *  - all bitmaps
 	 *  - GC
 	 */
+	if (pblk_init_blk(pblk, rblk))
+		goto free_recov_page;
+
+	pblk_recov_init(pblk, rblk, recov_page);
+
+	spin_lock(&rblk->rlun->lock_lists);
+	list_add_tail(&rblk->list, &rblk->rlun->closed_list);
+	spin_unlock(&rblk->rlun->lock_lists);
+
 	bppa = global_addr(pblk, rblk, 0);
 	for (i = 0; i < pblk->nr_blk_dsecs; i++) {
 		ppa = pblk_ppa_to_gaddr(dev, bppa + i);
 		if (lba_list[i] != ADDR_EMPTY &&
 					!nvm_boundary_checks(dev, &ppa, 1)) {
-			if (pblk_init_blk(pblk, rblk, rblk->rlun))
-				goto free_recov_page;
-
-			pblk_recov_init(pblk, rblk, recov_page);
 			pblk_update_map(pblk, lba_list[i], rblk, ppa);
-
-			spin_lock(&rblk->rlun->lock_lists);
-			list_add_tail(&rblk->list, &rblk->rlun->closed_list);
-			spin_unlock(&rblk->rlun->lock_lists);
 		}
 		/*else - mark as invalid */
 	}

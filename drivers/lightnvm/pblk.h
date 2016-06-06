@@ -424,8 +424,7 @@ int pblk_alloc_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		    struct pblk_ctx *ctx, unsigned int nr_secs);
 int pblk_read_from_cache(struct pblk *pblk, struct bio *bio,
 			 struct ppa_addr ppa);
-int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk,
-		  struct pblk_lun *rlun);
+int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk);
 void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk);
 void pblk_put_blk_unlocked(struct pblk *pblk, struct pblk_block *rblk);
 void pblk_end_io(struct nvm_rq *rqd);
