@@ -2308,10 +2308,15 @@ static void pblk_pad_open_blks(struct pblk *pblk)
 	struct pblk_block *rblk, *trblk;
 	unsigned int i, mod;
 	int nr_free_secs;
+	LIST_HEAD(open_list);
 
 	pblk_for_each_lun(pblk, rlun, i) {
 		spin_lock(&rlun->lock_lists);
-		list_for_each_entry_safe(rblk, trblk, &rlun->open_list, list) {
+		list_cut_position(&open_list, &rlun->open_list,
+							rlun->open_list.prev);
+		spin_unlock(&rlun->lock_lists);
+
+		list_for_each_entry_safe(rblk, trblk, &open_list, list) {
 			nr_free_secs = pblk_nr_free_secs(pblk, rblk);
 			div_u64_rem(nr_free_secs, pblk->min_write_pgs, &mod);
 			if (mod) {
@@ -2330,6 +2335,9 @@ static void pblk_pad_open_blks(struct pblk *pblk)
 
 			pblk_pad_blk(pblk, rblk, nr_free_secs);
 		}
+
+		spin_lock(&rlun->lock_lists);
+		list_splice(&open_list, &rlun->open_list);
 		spin_unlock(&rlun->lock_lists);
 	}
 
