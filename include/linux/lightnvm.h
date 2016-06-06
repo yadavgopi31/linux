@@ -211,6 +211,8 @@ struct nvm_target {
 	struct nvm_dev *dev;
 	struct nvm_tgt_type *type;
 	struct gendisk *disk;
+
+	struct kobject kobj;
 };
 
 struct nvm_tgt_instance {
