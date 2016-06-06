@@ -1,0 +1,244 @@
+What:		/sys/.../lightnvm/devices/<device>/capabilities
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Device capabilities and feature support.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/device_mode
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Current device operating mode.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/media_manager
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Media manager type e.g. "gennvm".
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/num_groups
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Number of configuration groups.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/ppa_format
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Physical Page Address format
+		 Reported as hex.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/vendor_opcode
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Vendor NVM opcode command set.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/version
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Version identifier.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/channel_parallelism
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Number of parallel commands in-flight within a channel.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/erase_max
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Maximum page erase time (in ns).
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/erase_typ
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Type page erase time (in ns).
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/flash_media_type
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 0: Single bit level cell flash (SLC)
+		 1: Two bit level cell flash (MLC)
+		 2: Three bit level cell flash (TLC)
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/media_capabilities
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Media and controller capabilties for flash memories.
+		 Represented as a bit-string, reported as hex.
+
+		 Bit	Feature
+		 ===============================
+		 0:	SLC mode
+		 1:	Command suspension
+		 2:	Scramble ON/OFF
+		 3:	Encryption
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/media_type
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 The rest of the <grp> attributes are determined by the value
+		 of the media_type.
+
+		 0: NAND Flash Memory
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/multiplane
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Support for multi-plane operations.
+		 Represented as a bitstring reported as hex.
+
+		 Bit	Feature
+		 ===============================
+		 0:	Single plane read
+		 1:	Dual plane read
+		 2:	Quad plane read
+		 8:	Single plane program
+		 9:	Dual plane program
+		 10:	Quad plane program
+		 16:	Single plane erase
+		 17:	Dual plane erase
+		 18:	Quad plane erase
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/num_blocks
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Number of flash block per plane.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/num_channels
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Number of channels in controller.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/num_luns
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Number of Logical Unit Numbers (LUNs) per channel.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/num_pages
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Number of flash pages per block.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/num_planes
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Number of flash planes per LUN.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/page_size
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Number of bytes per flash page.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/prog_max
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Maximum page program time (in ns).
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/prog_typ
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Typical page program time (in ns).
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/read_max
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Maximum page read time (in ns).
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/read_typ
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Typical page read time (in ns).
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/sector_oob_size
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Per-sector metadata (in bytes)
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/devices/<device>/<grp>/sector_size
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Controller defined minimum data unit protected by ECC
+		 (in bytes). For example 4096 bytes.
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
+What:		/sys/.../lightnvm/targets/<tgt>/type
+Date:		March 2016
+KernelVersion:	4.7
+Contact:	"Simon A. F. Lund" <slund@cnexlabs.com>
+Description:
+		 Target type e.g. "rrpc", "pblk".
+Users:		lnvm - https://github.com/OpenChannelSSD/lnvm
+
