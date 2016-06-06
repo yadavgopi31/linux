@@ -353,10 +353,9 @@ int pblk_recov_read(struct pblk *pblk, struct pblk_block *rblk,
 	}
 	wait_for_completion_io(&wait);
 
-	if (bio->bi_error) {
-		pr_err("pblk: recovery sync read failed (%u)\n", bio->bi_error);
-		pblk_print_failed_bio(rqd, rqd->nr_ppas);
-	}
+	if (bio->bi_error)
+		pr_debug("pblk: recovery sync read failed (%u)\n",
+								bio->bi_error);
 
 free_ppa_list:
 	nvm_free_rqd_ppalist(dev, rqd);
