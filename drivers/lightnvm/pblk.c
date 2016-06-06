@@ -2037,6 +2037,7 @@ static void pblk_core_free(struct pblk *pblk)
 
 	mempool_destroy(pblk->page_pool);
 	mempool_destroy(pblk->blk_ws_pool);
+	mempool_destroy(pblk->rec_pool);
 	mempool_destroy(pblk->r_rq_pool);
 	mempool_destroy(pblk->w_rq_pool);
 }
