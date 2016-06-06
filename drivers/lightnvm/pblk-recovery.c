@@ -406,6 +406,7 @@ static void pblk_recov_init(struct pblk *pblk, struct pblk_block *rblk,
 int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk)
 {
 	struct nvm_dev *dev = pblk->dev;
+	struct pblk_lun *rlun = rblk->rlun;
 	struct pblk_blk_rec_lpg *recov_page;
 	struct ppa_addr ppa;
 	u64 *lba_list;
@@ -438,14 +439,18 @@ int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk)
 	 *  - all bitmaps
 	 *  - GC
 	 */
-	if (pblk_init_blk(pblk, rblk))
+	if (pblk_init_blk(pblk, rblk, PBLK_BLK_ST_CLOSED))
 		goto free_recov_page;
 
 	pblk_recov_init(pblk, rblk, recov_page);
 
-	spin_lock(&rblk->rlun->lock_lists);
-	list_add_tail(&rblk->list, &rblk->rlun->closed_list);
-	spin_unlock(&rblk->rlun->lock_lists);
+	spin_lock(&rlun->lock_lists);
+	list_add_tail(&rblk->list, &rlun->closed_list);
+	spin_unlock(&rlun->lock_lists);
+
+	spin_lock(&rlun->lock);
+	list_add_tail(&rblk->prio, &rlun->prio_list);
+	spin_unlock(&rlun->lock);
 
 	bppa = global_addr(pblk, rblk, 0);
 	for (i = 0; i < pblk->nr_blk_dsecs; i++) {

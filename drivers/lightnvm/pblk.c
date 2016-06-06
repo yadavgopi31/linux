@@ -178,7 +178,7 @@ static void pblk_put_blks(struct pblk *pblk)
 	}
 }
 
-int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk)
+int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk, u32 status)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct pblk_blk_rec_lpg *rlpg;
@@ -202,7 +202,7 @@ int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk)
 		pr_err("pblk: cannot allocate recovery ppa list\n");
 		return -ENOMEM;
 	}
-	rlpg->status = PBLK_BLK_ST_OPEN;
+	rlpg->status = status;
 	rlpg->rlpg_len = rlpg_len;
 	rlpg->req_len = req_len;
 	rlpg->bitmap_len = bitmap_len;
@@ -238,7 +238,7 @@ try:
 	rblk = pblk_get_rblk(rlun, blk->id);
 	blk->priv = rblk;
 
-	if (pblk_init_blk(pblk, rblk))
+	if (pblk_init_blk(pblk, rblk, PBLK_BLK_ST_OPEN))
 		goto fail_return_blk;
 
 	spin_lock(&rlun->lock_lists);
