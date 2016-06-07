@@ -57,7 +57,12 @@ static int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 	if (pblk_rb_update_l2p(&pblk->rwb, nr_secs))
 		goto rollback;
 
+	/* Update the write buffer head (mem) with the entries that we can
+	 * write. The write in itself cannot fail, so there is no need to
+	 * rollback from here on.
+	 */
 	pos = pblk_rb_write_pos(&pblk->rwb);
+	pblk_rb_write_commit(&pblk->rwb, valid_secs);
 
 	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA)) {
 		b = bio;
@@ -83,9 +88,7 @@ static int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 		kref_get(&ref_buf->ref);
 
 		data = bio_data(bio);
-		if (pblk_rb_write_entry(&pblk->rwb, data, w_ctx,
-							pos + valid_secs))
-			goto rollback;
+		pblk_rb_write_entry(&pblk->rwb, data, w_ctx, pos + valid_secs);
 
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 		valid_secs++;
@@ -113,7 +116,6 @@ static int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 	atomic_add(valid_secs, &pblk->recov_gc_writes);
 #endif
 
-	pblk_rb_write_commit(&pblk->rwb, valid_secs);
 	return 1;
 
 rollback:

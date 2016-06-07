@@ -971,7 +971,12 @@ static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 	if (pblk_rb_update_l2p(&pblk->rwb, nr_entries))
 		goto rollback;
 
+	/* Update the write buffer head (mem) with the entries that we can
+	 * write. The write in itself cannot fail, so there is no need to
+	 * rollback from here on.
+	 */
 	pos = pblk_rb_write_pos(&pblk->rwb);
+	pblk_rb_write_commit(&pblk->rwb, nr_entries);
 
 	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA)) {
 		b = bio;
@@ -989,8 +994,7 @@ static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 		ppa_set_empty(&w_ctx.ppa.ppa);
 
 		data = bio_data(bio);
-		if (pblk_rb_write_entry(&pblk->rwb, data, w_ctx, pos + i))
-			goto rollback;
+		pblk_rb_write_entry(&pblk->rwb, data, w_ctx, pos + i);
 
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 	}
@@ -1000,11 +1004,6 @@ static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 					pblk_rb_wrap_pos(&pblk->rwb, pos + i));
 		pblk_update_map(pblk, laddr + i, NULL, ppa);
 	}
-
-	/* Update mapping table with the write buffer cachelines and commit
-	 * write transaction. This enables atomic rollback.
-	 */
-	pblk_rb_write_commit(&pblk->rwb, nr_entries);
 
 	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA))
 		pblk_write_kick(pblk);

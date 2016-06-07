@@ -231,16 +231,19 @@ static void pblk_rb_requeue_entry(struct pblk_rb *rb,
 {
 	struct pblk *pblk = container_of(rb, struct pblk, rwb);
 	struct ppa_addr ppa;
-	unsigned long mem;
+	unsigned long mem, sync;
 
 	/* Serialized in pblk_rb_write_init */
 	mem = READ_ONCE(rb->mem);
+	sync = ACCESS_ONCE(rb->sync);
 
 	/* Maintain original bio, lba and flags */
 	pblk_ppa_set_empty(&entry->w_ctx.ppa);
 
 	/* Move entry to the head of the write buffer and update l2p */
-	while (pblk_rb_write_entry(rb, entry->data, entry->w_ctx, mem));
+	while (pblk_rb_ring_space(rb, mem, sync, rb->nr_entries) < 1);
+	pblk_rb_write_entry(rb, entry->data, entry->w_ctx, mem);
+
 	ppa = pblk_cacheline_to_ppa(mem);
 	pblk_update_map(pblk, entry->w_ctx.lba, NULL, ppa);
 	smp_store_release(&rb->mem, (mem + 1) & (rb->nr_entries - 1));
@@ -395,18 +398,9 @@ int pblk_rb_write_entry(struct pblk_rb *rb, void *data, struct pblk_w_ctx w_ctx,
 {
 	struct pblk_rb_entry *entry;
 	unsigned long size = rb->seg_size;
-	unsigned long sync;
 	unsigned int ring_pos = (pos & (rb->nr_entries - 1));
+	int flags;
 	int ret = 0;
-
-	lockdep_assert_held(&rb->w_lock);
-
-	sync = ACCESS_ONCE(rb->sync);
-
-	if (pblk_rb_ring_space(rb, ring_pos, sync, rb->nr_entries) < 1) {
-		ret = -ENOMEM;
-		goto out;
-	}
 
 	entry = &rb->entries[ring_pos];
 	memcpy_torb(rb, entry->data, data, size);
@@ -417,6 +411,10 @@ int pblk_rb_write_entry(struct pblk_rb *rb, void *data, struct pblk_w_ctx w_ctx,
 		smp_load_acquire(&rb->sync_point);
 		smp_store_release(&rb->sync_point, pos);
 	}
+
+	flags = READ_ONCE(entry->w_ctx.flags);
+	flags |= PBLK_VALID_DATA;
+	smp_store_release(&entry->w_ctx.flags, flags);
 
 out:
 	return ret;
@@ -526,6 +524,7 @@ unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct bio *bio,
 	unsigned long count;
 	unsigned int pad = 0, read = 0, to_read = nr_entries;
 	unsigned int i;
+	int flags;
 	int ret;
 
 	lockdep_assert_held(&rb->r_lock);
@@ -549,15 +548,27 @@ unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct bio *bio,
 	for (i = 0; i < to_read; i++) {
 		entry = &rb->entries[subm];
 
+		/* A write has been allowed into the buffer, but data is still
+		 * being copied to it
+		 */
+try:
+		flags = READ_ONCE(entry->w_ctx.flags);
+		if (!(flags & PBLK_VALID_DATA))
+			goto try;
+
 		page = vmalloc_to_page(entry->data);
 		if (!page) {
 			pr_err("pblk: could not allocate write bio page\n");
+			flags &= ~PBLK_VALID_DATA;
+			smp_store_release(&entry->w_ctx.flags, flags);
 			goto out;
 		}
 
 		ret = bio_add_pc_page(q, bio, page, rb->seg_size, 0);
 		if (ret != rb->seg_size) {
 			pr_err("pblk: could not add page to write bio\n");
+			flags &= ~PBLK_VALID_DATA;
+			smp_store_release(&entry->w_ctx.flags, flags);
 			goto out;
 		}
 
@@ -567,6 +578,9 @@ unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct bio *bio,
 			atomic_dec(&rb->inflight_sync_point);
 #endif
 		}
+
+		flags &= ~PBLK_VALID_DATA;
+		smp_store_release(&entry->w_ctx.flags, flags);
 
 		subm = (subm + 1) & (rb->nr_entries - 1);
 	}

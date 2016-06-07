@@ -42,12 +42,16 @@
 #define NR_PHY_IN_LOG (PBLK_EXPOSED_PAGE_SIZE / PBLK_SECTOR)
 
 enum {
+	/* IO Types */
 	PBLK_IOTYPE_NONE = 0,
 	PBLK_IOTYPE_GC = 1,
 	PBLK_IOTYPE_SYNC = 2,
 	PBLK_IOTYPE_CLOSE_BLK = 4,
 	PBLK_IOTYPE_PAD = 8,
 	PBLK_IOTYPE_REF = 16,
+
+	/* Write buffer flags */
+	PBLK_VALID_DATA = 128,
 };
 
 enum {
