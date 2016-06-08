@@ -590,9 +590,7 @@ static int pblk_core_init(struct pblk *pblk)
 		goto free_kw_wq;
 
 	INIT_LIST_HEAD(&pblk->compl_list);
-
 	return 0;
-
 free_kw_wq:
 	destroy_workqueue(pblk->kw_wq);
 free_w_rq_pool:
@@ -605,9 +603,7 @@ free_blk_ws_pool:
 	mempool_destroy(pblk->blk_ws_pool);
 free_page_pool:
 	mempool_destroy(pblk->page_pool);
-
 	return -ENOMEM;
-
 }
 
 static void pblk_core_free(struct pblk *pblk)

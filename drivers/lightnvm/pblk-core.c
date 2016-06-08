@@ -18,95 +18,6 @@
 #include "pblk-gc.h"
 #include "pblk-recovery.h"
 
-int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk, u32 status)
-{
-	struct nvm_dev *dev = pblk->dev;
-	struct pblk_blk_rec_lpg *rlpg;
-	unsigned int rlpg_len, req_len, bitmap_len;
-	int nr_entries = pblk->nr_blk_dsecs;
-	int nr_bitmaps = 3; /* sectors, sync, invalid */
-
-	bitmap_len = BITS_TO_LONGS(nr_entries);
-	rlpg_len = sizeof(struct pblk_blk_rec_lpg) +
-			(nr_entries * sizeof(u64)) +
-			(nr_bitmaps * bitmap_len * sizeof(unsigned long));
-	req_len = dev->sec_per_pl * dev->sec_size;
-
-	if (rlpg_len > req_len) {
-		pr_err("pblk: metadata is too large for last page size\n");
-		return -EINVAL;
-	}
-
-	rlpg = kzalloc(req_len, GFP_KERNEL);
-	if (!rlpg) {
-		pr_err("pblk: cannot allocate recovery ppa list\n");
-		return -ENOMEM;
-	}
-	rlpg->status = status;
-	rlpg->rlpg_len = rlpg_len;
-	rlpg->req_len = req_len;
-	rlpg->bitmap_len = bitmap_len;
-	rlpg->crc = 0;
-	rlpg->nr_lbas = 0;
-	rlpg->nr_padded = 0;
-
-	pblk_rlpg_set_bitmaps(rlpg, rblk, nr_entries);
-
-	rblk->cur_sec = 0;
-	rblk->nr_invalid_secs = 0;
-	rblk->rlpg = rlpg;
-
-	return 0;
-}
-
-/* TODO: Need to implement the different strategies */
-int pblk_calc_secs_to_sync(struct pblk *pblk, unsigned long secs_avail,
-				  unsigned long secs_to_flush)
-{
-	int max = pblk->max_write_pgs;
-	int min = pblk->min_write_pgs;
-	int sync = NVM_SYNC_HARD; /* TODO: Move to sysfs and put it in pblk */
-	int secs_to_sync = 0;
-
-	switch (sync) {
-	case NVM_SYNC_SOFT:
-		if (secs_avail >= max)
-			secs_to_sync = max;
-		break;
-	case NVM_SYNC_HARD:
-	case NVM_SYNC_OPORT:
-		if ((secs_avail >= max) || (secs_to_flush >= max)) {
-			secs_to_sync = max;
-		} else if (secs_avail >= min) {
-			if (secs_to_flush) {
-				secs_to_sync = min * (secs_to_flush / min);
-				while (1) {
-					int inc = secs_to_sync + min;
-					if (inc <= secs_avail && inc <= max)
-						secs_to_sync += min;
-					else
-						break;
-				}
-			} else
-				secs_to_sync = min * (secs_avail / min);
-		} else {
-			if (secs_to_flush && sync != NVM_SYNC_OPORT)
-				secs_to_sync = min;
-		}
-	}
-
-	BUG_ON(!secs_to_sync && secs_to_flush);
-
-	return secs_to_sync;
-}
-
-void pblk_end_sync_bio(struct bio *bio)
-{
-	struct completion *waiting = bio->bi_private;
-
-	complete(waiting);
-}
-
 static void pblk_bio_free_pages(struct pblk *pblk, struct bio *bio, int off,
 				int nr_pages)
 {
@@ -147,7 +58,6 @@ static int pblk_bio_add_pages(struct pblk *pblk, struct bio *bio, gfp_t flags,
 	}
 
 	return 0;
-
 err:
 	pblk_bio_free_pages(pblk, bio, 0, i - 1);
 	return -1;
@@ -221,6 +131,13 @@ int pblk_read_rq(struct pblk *pblk, struct bio *bio, struct nvm_rq *rqd,
 
 done:
 	return NVM_IO_DONE;
+}
+
+void pblk_end_sync_bio(struct bio *bio)
+{
+	struct completion *waiting = bio->bi_private;
+
+	complete(waiting);
 }
 
 int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
@@ -438,6 +355,47 @@ void pblk_retire_blk(struct pblk *pblk, struct pblk_block *rblk)
 	nvm_put_blk(pblk->dev, rblk->parent);
 	list_del(&rblk->list);
 	spin_unlock(&rlun->lock_lists);
+}
+
+int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk, u32 status)
+{
+	struct nvm_dev *dev = pblk->dev;
+	struct pblk_blk_rec_lpg *rlpg;
+	unsigned int rlpg_len, req_len, bitmap_len;
+	int nr_entries = pblk->nr_blk_dsecs;
+	int nr_bitmaps = 3; /* sectors, sync, invalid */
+
+	bitmap_len = BITS_TO_LONGS(nr_entries);
+	rlpg_len = sizeof(struct pblk_blk_rec_lpg) +
+			(nr_entries * sizeof(u64)) +
+			(nr_bitmaps * bitmap_len * sizeof(unsigned long));
+	req_len = dev->sec_per_pl * dev->sec_size;
+
+	if (rlpg_len > req_len) {
+		pr_err("pblk: metadata is too large for last page size\n");
+		return -EINVAL;
+	}
+
+	rlpg = kzalloc(req_len, GFP_KERNEL);
+	if (!rlpg) {
+		pr_err("pblk: cannot allocate recovery ppa list\n");
+		return -ENOMEM;
+	}
+	rlpg->status = status;
+	rlpg->rlpg_len = rlpg_len;
+	rlpg->req_len = req_len;
+	rlpg->bitmap_len = bitmap_len;
+	rlpg->crc = 0;
+	rlpg->nr_lbas = 0;
+	rlpg->nr_padded = 0;
+
+	pblk_rlpg_set_bitmaps(rlpg, rblk, nr_entries);
+
+	rblk->cur_sec = 0;
+	rblk->nr_invalid_secs = 0;
+	rblk->rlpg = rlpg;
+
+	return 0;
 }
 
 struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
@@ -881,6 +839,46 @@ out:
 	return ret;
 }
 
+/* TODO: Need to implement the different strategies */
+int pblk_calc_secs_to_sync(struct pblk *pblk, unsigned long secs_avail,
+				  unsigned long secs_to_flush)
+{
+	int max = pblk->max_write_pgs;
+	int min = pblk->min_write_pgs;
+	int sync = NVM_SYNC_HARD; /* TODO: Move to sysfs and put it in pblk */
+	int secs_to_sync = 0;
+
+	switch (sync) {
+	case NVM_SYNC_SOFT:
+		if (secs_avail >= max)
+			secs_to_sync = max;
+		break;
+	case NVM_SYNC_HARD:
+	case NVM_SYNC_OPORT:
+		if ((secs_avail >= max) || (secs_to_flush >= max)) {
+			secs_to_sync = max;
+		} else if (secs_avail >= min) {
+			if (secs_to_flush) {
+				secs_to_sync = min * (secs_to_flush / min);
+				while (1) {
+					int inc = secs_to_sync + min;
+					if (inc <= secs_avail && inc <= max)
+						secs_to_sync += min;
+					else
+						break;
+				}
+			} else
+				secs_to_sync = min * (secs_avail / min);
+		} else {
+			if (secs_to_flush && sync != NVM_SYNC_OPORT)
+				secs_to_sync = min;
+		}
+	}
+
+	BUG_ON(!secs_to_sync && secs_to_flush);
+
+	return secs_to_sync;
+}
 
 /*
  * pblk_submit_write -- thread to submit buffered writes to device
