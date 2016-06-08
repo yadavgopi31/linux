@@ -49,31 +49,6 @@ static void pblk_discard(struct pblk *pblk, struct bio *bio)
 	pblk_invalidate_range(pblk, slba, nr_secs);
 }
 
-static inline u64 pblk_nr_free_secs(struct pblk *pblk, struct pblk_block *rblk)
-{
-	u64 free_secs = pblk->nr_blk_dsecs;
-
-	spin_lock(&rblk->lock);
-	free_secs -= bitmap_weight(rblk->sector_bitmap, pblk->nr_blk_dsecs);
-	spin_unlock(&rblk->lock);
-
-	return free_secs;
-}
-
-static void pblk_put_blks(struct pblk *pblk)
-{
-	struct pblk_lun *rlun;
-	int i;
-
-	for (i = 0; i < pblk->nr_luns; i++) {
-		rlun = &pblk->luns[i];
-		if (rlun->cur)
-			pblk_put_blk(pblk, rlun->cur);
-		if (rlun->gc_cur)
-			pblk_put_blk(pblk, rlun->gc_cur);
-	}
-}
-
 static const struct block_device_operations pblk_fops = {
 	.owner		= THIS_MODULE,
 };
@@ -1119,6 +1094,17 @@ free_pad_data:
 	kfree(pad_data);
 }
 
+static inline u64 pblk_nr_free_secs(struct pblk *pblk, struct pblk_block *rblk)
+{
+	u64 free_secs = pblk->nr_blk_dsecs;
+
+	spin_lock(&rblk->lock);
+	free_secs -= bitmap_weight(rblk->sector_bitmap, pblk->nr_blk_dsecs);
+	spin_unlock(&rblk->lock);
+
+	return free_secs;
+}
+
 /*
  * XXX: For now, we pad the whole block. In the future, pad only the pages that
  * are needed to guarantee that future reads will come, and delegate bringing up
@@ -1288,7 +1274,14 @@ static int pblk_luns_configure(struct pblk *pblk)
 
 	return 0;
 err:
-	pblk_put_blks(pblk);
+	while (--i >= 0) {
+		rlun = &pblk->luns[i];
+
+		if (rlun->cur)
+			pblk_put_blk(pblk, rlun->cur);
+		if (rlun->gc_cur)
+			pblk_put_blk(pblk, rlun->gc_cur);
+	}
 	return -EINVAL;
 }
 
