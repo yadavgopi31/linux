@@ -384,7 +384,7 @@ unsigned int pblk_rb_read_to_bio_list(struct pblk_rb *rb, struct bio *bio,
 				      struct pblk_ctx *ctx,
 				      struct list_head *list,
 				      unsigned int max);
-unsigned int pblk_rb_copy_to_bio(struct pblk_rb *rb, struct bio *bio, u64 pos);
+void pblk_rb_copy_to_bio(struct pblk_rb *rb, struct bio *bio, u64 pos);
 void pblk_rb_read_commit(struct pblk_rb *rb, unsigned int entries);
 void pblk_rb_read_rollback(struct pblk_rb *rb);
 
@@ -425,7 +425,7 @@ int pblk_setup_w_single(struct pblk *pblk, struct nvm_rq *rqd,
 			struct pblk_ctx *ctx, struct pblk_sec_meta *meta);
 int pblk_alloc_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		    struct pblk_ctx *ctx, unsigned int nr_secs);
-int pblk_read_from_cache(struct pblk *pblk, struct bio *bio,
+void pblk_read_from_cache(struct pblk *pblk, struct bio *bio,
 			 struct ppa_addr ppa);
 int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk, u32 status);
 void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk);

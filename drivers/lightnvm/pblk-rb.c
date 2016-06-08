@@ -601,7 +601,7 @@ out:
  *
  * This function is used to copy data on the write buffer to a read bio.
  */
-unsigned int pblk_rb_copy_to_bio(struct pblk_rb *rb, struct bio *bio,
+void pblk_rb_copy_to_bio(struct pblk_rb *rb, struct bio *bio,
 								u64 pos)
 {
 	struct pblk_rb_entry *entry;
@@ -609,11 +609,9 @@ unsigned int pblk_rb_copy_to_bio(struct pblk_rb *rb, struct bio *bio,
 	struct page *page;
 	void *kaddr;
 
-	if (pos >= rb->nr_entries) {
-		pr_err("pblk: out-of-bound access to write buffer:%llu\n", pos);
-		return 0;
-	}
-
+#ifdef CONFIG_NVM_DEBUG
+	BUG_ON(pos >= rb->nr_entries);
+#endif
 	entry = &rb->entries[pos];
 
 	bv = bio_iter_iovec(bio, bio->bi_iter);
@@ -621,8 +619,6 @@ unsigned int pblk_rb_copy_to_bio(struct pblk_rb *rb, struct bio *bio,
 	kaddr = kmap_atomic(page);
 	memcpy_fromrb(rb, kaddr + bv.bv_offset, entry->data, rb->seg_size);
 	kunmap_atomic(kaddr);
-
-	return 1;
 }
 
 struct pblk_w_ctx *pblk_rb_w_ctx(struct pblk_rb *rb, unsigned long pos)

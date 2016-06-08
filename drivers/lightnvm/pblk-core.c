@@ -63,10 +63,10 @@ err:
 	return -1;
 }
 
-int pblk_read_from_cache(struct pblk *pblk, struct bio *bio,
+void pblk_read_from_cache(struct pblk *pblk, struct bio *bio,
 			 struct ppa_addr ppa)
 {
-	return pblk_rb_copy_to_bio(&pblk->rwb, bio, nvm_addr_to_cacheline(ppa));
+	pblk_rb_copy_to_bio(&pblk->rwb, bio, nvm_addr_to_cacheline(ppa));
 }
 
 static int pblk_try_read_from_cache(struct pblk *pblk, struct bio *bio,
@@ -80,7 +80,8 @@ static int pblk_try_read_from_cache(struct pblk *pblk, struct bio *bio,
 	if (!nvm_addr_in_cache(addr->ppa))
 		return 0;
 
-	return pblk_read_from_cache(pblk, bio, addr->ppa);
+	pblk_read_from_cache(pblk, bio, addr->ppa);
+	return 1;
 }
 
 int pblk_read_rq(struct pblk *pblk, struct bio *bio, struct nvm_rq *rqd,
