@@ -25,7 +25,7 @@ static struct kmem_cache *pblk_blk_ws_cache, *pblk_rec_cache, *pblk_r_rq_cache,
 static DECLARE_RWSEM(pblk_lock);
 
 static void pblk_invalidate_range(struct pblk *pblk, sector_t slba,
-							unsigned nr_secs)
+							unsigned int nr_secs)
 {
 	sector_t i;
 
@@ -353,7 +353,6 @@ static int __pblk_submit_read(struct pblk *pblk, struct bio *bio,
 	}
 
 	return NVM_IO_OK;
-
 fail_ppa_free:
 	if ((nr_secs > 1) && (!(flags & PBLK_IOTYPE_GC)))
 		nvm_dev_dma_free(pblk->dev, rqd->ppa_list, rqd->dma_ppa_list);
@@ -403,6 +402,7 @@ static int pblk_submit_io(struct pblk *pblk, struct bio *bio,
 {
 	if (pblk_submit_io_checks(pblk, bio))
 		return NVM_IO_ERR;
+
 	if (bio_rw(bio) == READ)
 		return pblk_submit_read(pblk, bio, flags);
 
@@ -622,6 +622,7 @@ static int pblk_map_init(struct pblk *pblk)
 
 	for (i = 0; i < pblk->nr_secs; i++) {
 		struct pblk_addr *p = &pblk->trans_map[i];
+
 		p->rblk = NULL;
 		ppa_set_empty(&p->ppa);
 	}
@@ -641,7 +642,7 @@ static int pblk_rwb_init(struct pblk *pblk)
 	struct pblk_rb_entry *entries;
 	void *data_buffer;
 	unsigned long nr_entries, data_size;
-	unsigned power_size, power_seg_sz, grace_area_sz;
+	unsigned int power_size, power_seg_sz, grace_area_sz;
 
 	/*
 	 * pblk write buffer characteristics:
@@ -1057,7 +1058,7 @@ static void pblk_pad_blk(struct pblk *pblk, struct pblk_block *rblk,
 	unsigned int bio_len;
 	int nr_secs, err;
 
-	pad_data = kzalloc(pblk->max_write_pgs * dev->sec_size, GFP_ATOMIC);
+	pad_data = kzalloc(pblk->max_write_pgs * dev->sec_size, GFP_KERNEL);
 	if (!pad_data) {
 		pr_err("pblk: could not allocate tear down pad data\n");
 		return;
@@ -1067,7 +1068,7 @@ static void pblk_pad_blk(struct pblk *pblk, struct pblk_block *rblk,
 		nr_secs = (nr_free_secs > pblk->max_write_pgs) ?
 					pblk->max_write_pgs : nr_free_secs;
 
-		rqd = mempool_alloc(pblk->w_rq_pool, GFP_ATOMIC);
+		rqd = mempool_alloc(pblk->w_rq_pool, GFP_KERNEL);
 		if (!rqd) {
 			pr_err("pblk: could not alloc write req.\n ");
 			goto free_pad_data;
@@ -1077,7 +1078,7 @@ static void pblk_pad_blk(struct pblk *pblk, struct pblk_block *rblk,
 		c_ctx = ctx->c_ctx;
 
 		bio_len = nr_secs * dev->sec_size;
-		bio = bio_map_kern(dev->q, pad_data, bio_len, GFP_ATOMIC);
+		bio = bio_map_kern(dev->q, pad_data, bio_len, GFP_KERNEL);
 		if (!bio) {
 			pr_err("pblk: could not alloc tear down bio\n");
 			goto free_rqd;

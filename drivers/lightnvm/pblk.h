@@ -167,7 +167,7 @@ struct pblk_rb {
 					 * of a cacheline
 					 */
 	unsigned long nr_entries;	/* Number of entries in write buffer -
-					   must be a power of two */
+					 * must be a power of two */
 	unsigned long grace_area;	/* Space in buffer that must be
 					 * respected between head and tail. This
 					 * space is memory-specific.
@@ -256,7 +256,6 @@ struct pblk_lun {
 	unsigned int nr_bad_blocks;	/* Number grown bad blocks */
 
 	struct work_struct ws_gc;
-	// struct work_struct ws_prov;
 
 	spinlock_t lock_lists;
 	spinlock_t lock;
@@ -446,8 +445,7 @@ static inline void pblk_print_failed_bio(struct nvm_rq *rqd, int nr_ppas)
 
 		while ((bit = find_next_bit((void *)&rqd->ppa_status, nr_ppas,
 							bit + 1)) < nr_ppas) {
-			pr_err("\tbit:%d: ch:%d,pl:%d,lun:%d,blk:%d,pg:%d, "
-								"sec:%d\n",
+			pr_err("\tbit:%d: ch:%d,pl:%d,lun:%d,blk:%d,pg:%d,sec:%d\n",
 					bit,
 					rqd->ppa_list[bit].g.ch,
 					rqd->ppa_list[bit].g.pl,

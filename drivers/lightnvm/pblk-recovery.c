@@ -59,8 +59,7 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 retry:
 	ret = pblk_gc_move_valid_secs(pblk, rblk, &lba_list[off], nr_entries);
 	if (ret != nr_entries) {
-		pr_err("pblk: could not recover all sectors:blk:%lu, "
-						"recovered:%d/%d. Try:%d/%d\n",
+		pr_err("pblk: could not recover all sectors:blk:%lu, recovered:%d/%d. Try:%d/%d\n",
 						rblk->parent->id,
 						ret, nr_entries,
 						try, PBLK_GC_TRIES);
@@ -164,7 +163,7 @@ static void pblk_submit_rec(struct work_struct *work)
 	int err;
 
 	nr_rec_secs =
-		bitmap_weight((long unsigned int *)&rqd->ppa_status, max_secs);
+		bitmap_weight((unsigned long int *)&rqd->ppa_status, max_secs);
 
 	bio = bio_alloc(GFP_KERNEL, nr_rec_secs);
 	if (!bio) {
@@ -246,8 +245,8 @@ int pblk_recov_setup_end_rq(struct pblk *pblk, struct pblk_ctx *ctx,
 	rec_c_ctx = rec_ctx->c_ctx;
 
 	/* Copy completion bitmap, but exclude the first X completed entries */
-	bitmap_shift_right((long unsigned int *)&rec_rqd->ppa_status,
-				(long unsigned int *)comp_bits,
+	bitmap_shift_right((unsigned long int *)&rec_rqd->ppa_status,
+				(unsigned long int *)comp_bits,
 				c_entries, max_secs);
 
 	/* Save the context for the entries that need to be re-written and
