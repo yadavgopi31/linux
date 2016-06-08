@@ -18,8 +18,6 @@
 #include "pblk-recovery.h"
 #include "pblk-gc.h"
 
-extern unsigned long pblk_r_rq_size, pblk_w_rq_size;
-
 /*
  * Write Retry - These set of functions implement recovery mechanisms for a
  * failed write.

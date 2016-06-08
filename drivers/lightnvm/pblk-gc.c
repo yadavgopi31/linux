@@ -19,8 +19,6 @@
 #include "pblk-gc.h"
 #include "pblk-recovery.h"
 
-extern unsigned long pblk_r_rq_size, pblk_w_rq_size;
-
 static void pblk_free_gc_rqd(struct pblk *pblk, struct nvm_rq *rqd)
 {
 	uint8_t nr_secs = rqd->nr_ppas;

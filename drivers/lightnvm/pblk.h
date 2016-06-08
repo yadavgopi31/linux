@@ -167,7 +167,7 @@ struct pblk_rb {
 					 * REQ_FLUSH and REQ_FUA
 					 */
 	unsigned long l2p_update;	/* l2p update point - next entry for
-					   which l2p mapping will be updated to
+					 * which l2p mapping will be updated to
 					 * contain a device ppa address (instead
 					 * of a cacheline
 					 */
@@ -197,11 +197,11 @@ struct pblk_rb {
 };
 
 #define PBLK_RECOVERY_SECTORS 4
-/* Recovery stored in the last page of the block. A list of lbas (u64) is
+/*
+ * Recovery stored in the last page of the block. A list of lbas (u64) is
  * allocated together with this structure to allow block recovery and GC.
  * After this structure, we store the following block bitmaps on the last page:
  * sector_bitmap, sync_bitmap and invalid_bitmap in this order.
- *
  */
 struct pblk_blk_rec_lpg {
 	u32 crc;
@@ -222,7 +222,7 @@ struct pblk_block {
 
 	struct pblk_blk_rec_lpg *rlpg;
 
-	unsigned long *sector_bitmap;		/* Bitmap for free (0) / used sectors
+	unsigned long *sector_bitmap;	/* Bitmap for free (0) / used sectors
 					 * (1) in the block
 					 */
 	unsigned long *sync_bitmap;	/* Bitmap representing physical
@@ -353,6 +353,10 @@ struct pblk_block_ws {
 	struct work_struct ws_blk;
 };
 
+#define pblk_r_rq_size (sizeof(struct nvm_rq) + sizeof(struct pblk_r_ctx))
+#define pblk_w_rq_size (sizeof(struct nvm_rq) + sizeof(struct pblk_ctx) + \
+			sizeof(struct pblk_compl_ctx))
+
 /*
  * pblk ring buffer operations
  */
@@ -434,6 +438,7 @@ void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk);
 void pblk_put_blk_unlocked(struct pblk *pblk, struct pblk_block *rblk);
 void pblk_end_io(struct nvm_rq *rqd);
 void pblk_end_sync_bio(struct bio *bio);
+void pblk_free_blks(struct pblk *pblk);
 
 #ifdef CONFIG_NVM_DEBUG
 void pblk_rb_print_debug(struct pblk_rb *rb);
