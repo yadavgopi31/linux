@@ -390,6 +390,7 @@ static void pblk_recov_init(struct pblk *pblk, struct pblk_block *rblk,
 			    struct pblk_blk_rec_lpg *rlpg)
 {
 	memcpy(rblk->rlpg, rlpg, rlpg->rlpg_len);
+	rblk->nr_invalid_secs = rblk->rlpg->nr_invalid_secs;
 }
 
 /*
