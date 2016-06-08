@@ -414,14 +414,18 @@ int pblk_rb_pos_oob(struct pblk_rb *rb, u64 pos);
  */
 int pblk_calc_secs_to_sync(struct pblk *pblk, unsigned long secs_avail,
 			   unsigned long secs_to_flush);
+int pblk_buffer_write(struct pblk *pblk, struct bio *bio, unsigned long flags);
+void pblk_flush_writer(struct pblk *pblk);
 int pblk_read_rq(struct pblk *pblk, struct bio *bio, struct nvm_rq *rqd,
 		 sector_t laddr, unsigned long flags,
 		 unsigned long *read_bitmap);
+int pblk_submit_read(struct pblk *pblk, struct bio *bio, unsigned long flags);
 int pblk_submit_read_io(struct pblk *pblk, struct bio *bio,
 			struct nvm_rq *rqd, unsigned long flags);
 int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 			       unsigned long *read_bitmap, struct nvm_rq *rqd,
 			       uint8_t nr_secs);
+void pblk_discard(struct pblk *pblk, struct bio *bio);
 int pblk_setup_w_multi(struct pblk *pblk, struct nvm_rq *rqd,
 		       struct pblk_ctx *ctx, struct pblk_sec_meta *meta,
 		       unsigned int valid_secs, int off);
