@@ -565,6 +565,7 @@ next_lba_list:
 	} while (nr_ppas < PBLK_MAX_REQ_ADDRS);
 
 prepare_ppas:
+	nr_ppas++;
 	moved = pblk_gc_move_valid_secs(pblk, rblk, gc_lba_list, nr_ppas);
 	if (moved != nr_ppas) {
 		pr_err("pblk: could not GC all sectors:blk:%lu, GC:%d/%d/%d\n",
