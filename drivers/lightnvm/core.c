@@ -63,6 +63,7 @@ int nvm_register_tgt_type(struct nvm_tgt_type *tt)
 		list_add(&tt->list, &nvm_tgt_types);
 	up_write(&nvm_tgtt_lock);
 
+	printk("nvm: registered target type: %s\n", tt->name);
 	return ret;
 }
 EXPORT_SYMBOL(nvm_register_tgt_type);

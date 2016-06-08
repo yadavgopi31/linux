@@ -440,7 +440,7 @@ void pblk_retire_blk(struct pblk *pblk, struct pblk_block *rblk)
 	spin_unlock(&rlun->lock_lists);
 }
 
-static struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
+struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
 							unsigned long flags)
 {
 	struct nvm_dev *dev = pblk->dev;
@@ -488,7 +488,7 @@ fail_get_blk:
 	return NULL;
 }
 
-static void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk,
+void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk,
 								int is_bb)
 {
 	struct pblk *pblk = rlun->pblk;
@@ -840,6 +840,151 @@ void pblk_end_io(struct nvm_rq *rqd)
 		pblk_end_io_write(pblk, rqd);
 }
 
+static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
+						struct pblk_ctx *ctx)
+{
+	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
+	unsigned int valid_secs = c_ctx->nr_valid;
+	unsigned int padded_secs = c_ctx->nr_padded;
+	unsigned int nr_secs = valid_secs + padded_secs;
+	struct pblk_sec_meta *meta;
+	unsigned int setup_secs;
+	int min = pblk->min_write_pgs;
+	int i;
+	int ret = 0;
+
+	ret = pblk_alloc_w_rq(pblk, rqd, ctx, nr_secs);
+	if (ret)
+		goto out;
+
+	meta = rqd->meta_list;
+
+	if (unlikely(nr_secs == 1)) {
+		BUG_ON(padded_secs != 0);
+		ret = pblk_setup_w_single(pblk, rqd, ctx, meta);
+		goto out;
+	}
+
+	for (i = 0; i < nr_secs; i += min) {
+		setup_secs = (i + min > valid_secs) ?
+						(valid_secs % min) : min;
+		ret = pblk_setup_w_multi(pblk, rqd, ctx, meta, setup_secs, i);
+	}
+
+#ifdef CONFIG_NVM_DEBUG
+	if (nvm_boundary_checks(pblk->dev, rqd->ppa_list, rqd->nr_ppas))
+		BUG_ON(1);
+		/* WARN_ON(1); */
+#endif
+
+out:
+	return ret;
+}
+
+
+/*
+ * pblk_submit_write -- thread to submit buffered writes to device
+ *
+ * The writer respects page size constrains defined by the device and will try
+ * to send as many pages in a single I/O as supported by the device.
+ *
+ */
+void pblk_submit_write(struct work_struct *work)
+{
+	struct pblk *pblk = container_of(work, struct pblk, ws_writer);
+	struct nvm_dev *dev = pblk->dev;
+	struct bio *bio;
+	struct nvm_rq *rqd;
+	struct pblk_ctx *ctx;
+	struct pblk_compl_ctx *c_ctx;
+	unsigned int pgs_read;
+	unsigned int secs_avail, secs_to_sync, secs_to_flush = 0;
+	unsigned long sync_point;
+	int err;
+
+	rqd = mempool_alloc(pblk->w_rq_pool, GFP_KERNEL);
+	if (!rqd) {
+		pr_err("pblk: not able to create write req.\n");
+		return;
+	}
+	memset(rqd, 0, pblk_w_rq_size);
+	ctx = pblk_set_ctx(pblk, rqd);
+	c_ctx = ctx->c_ctx;
+
+	bio = bio_alloc(GFP_KERNEL, pblk->max_write_pgs);
+	if (!bio) {
+		pr_err("pblk: not able to create write bio\n");
+		goto fail_rqd;
+	}
+
+	/* Count available entries on rb, and lock reader */
+	secs_avail = pblk_rb_count_init(&pblk->rwb);
+	if (!secs_avail)
+		goto fail_bio;
+
+	secs_to_flush = pblk_rb_sync_point_count(&pblk->rwb);
+	secs_to_sync = pblk_calc_secs_to_sync(pblk, secs_avail, secs_to_flush);
+	if (secs_to_sync < 0) {
+		pr_err("pblk: bad buffer sync calculation\n");
+		goto end_rollback;
+	}
+
+	if (!secs_to_sync)
+		goto end_rollback;
+
+	pgs_read = pblk_rb_read_to_bio(&pblk->rwb, bio, ctx, secs_to_sync,
+							&sync_point);
+	if (!pgs_read)
+		goto fail_sync;
+
+	if (secs_to_flush <= secs_to_sync)
+		pblk_rb_sync_point_reset(&pblk->rwb, sync_point);
+
+	pblk_rb_read_commit(&pblk->rwb, pgs_read);
+
+	if (c_ctx->nr_padded)
+		if (pblk_bio_add_pages(pblk, bio, GFP_KERNEL, c_ctx->nr_padded))
+			goto fail_sync;
+
+	bio->bi_iter.bi_sector = 0; /* artificial bio */
+	bio->bi_rw = WRITE;
+	rqd->bio = bio;
+
+	/* Assign lbas to ppas and populate request structure */
+	err = pblk_setup_w_rq(pblk, rqd, ctx);
+	if (err) {
+		pr_err("pblk: could not setup write request\n");
+		goto fail_free_bio;
+	}
+
+	err = nvm_submit_io(dev, rqd);
+	if (err) {
+		pr_err("pblk: I/O submission failed: %d\n", err);
+		goto fail_free_bio;
+	}
+
+#ifdef CONFIG_NVM_DEBUG
+	atomic_add(secs_to_sync, &pblk->sub_writes);
+#endif
+
+	return;
+
+fail_free_bio:
+	if (c_ctx->nr_padded)
+		pblk_bio_free_pages(pblk, bio, secs_to_sync, c_ctx->nr_padded);
+fail_sync:
+	/* Fail is probably caused by a locked lba - kick the queue to avoid a
+	 * deadlock in the case that no new I/Os are coming in.
+	 * TODO: Look into this now that there it no locking
+	 */
+	pblk_write_kick(pblk);
+end_rollback:
+	pblk_rb_read_rollback(&pblk->rwb);
+fail_bio:
+	bio_put(bio);
+fail_rqd:
+	mempool_free(rqd, pblk->w_rq_pool);
+}
 
 /* The ppa in pblk_addr comes with an offset format, not a global format */
 static void pblk_page_pad_invalidate(struct pblk *pblk, struct pblk_block *rblk,
@@ -939,6 +1084,231 @@ static int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 	spin_unlock(&rblk->lock);
 
 	return 0;
+}
+
+
+
+
+static int pblk_setup_pad_rq(struct pblk *pblk, struct pblk_block *rblk,
+				struct nvm_rq *rqd, struct pblk_ctx *ctx)
+{
+	struct nvm_dev *dev = pblk->dev;
+	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
+	unsigned int valid_secs = c_ctx->nr_valid;
+	unsigned int padded_secs = c_ctx->nr_padded;
+	struct pblk_lun *rlun = rblk->rlun;
+	unsigned int nr_secs = valid_secs + padded_secs;
+	struct pblk_sec_meta *meta;
+	int min = pblk->min_write_pgs;
+	int i;
+	int ret = 0;
+
+	ret = pblk_alloc_w_rq(pblk, rqd, ctx, nr_secs);
+	if (ret)
+		goto out;
+
+	meta = rqd->meta_list;
+
+	if (unlikely(nr_secs == 1)) {
+		/*
+		 * Single sector path - this path is highly improbable since
+		 * controllers typically deal with multi-sector and multi-plane
+		 * pages. This path is though useful for testing on QEMU
+		 */
+		BUG_ON(dev->sec_per_pl != 1);
+		BUG_ON(padded_secs != 0);
+
+		spin_lock(&rlun->lock);
+		ret = pblk_map_page(pblk, rblk, c_ctx->sentry, &rqd->ppa_addr,
+								&meta[0], 1, 0);
+		spin_unlock(&rlun->lock);
+
+		/* A page mapping counts as one inflight I/O */
+		down(&pblk->ch_list[rlun->ch].ch_sm);
+
+		if (ret) {
+			/*
+			 * TODO:  There is no more available pages, we need to
+			 * recover. Probably a requeue of the bio is enough.
+			 */
+			BUG_ON(1);
+		}
+
+		goto out;
+	}
+
+	for (i = 0; i < nr_secs; i += min) {
+		spin_lock(&rlun->lock);
+		ret = pblk_map_page(pblk, rblk, c_ctx->sentry + i,
+						&rqd->ppa_list[i],
+						&meta[i], min, 0);
+		spin_unlock(&rlun->lock);
+
+		/* A page mapping counts as one inflight I/O */
+		down(&pblk->ch_list[rlun->ch].ch_sm);
+
+		if (ret) {
+			/*
+			 * TODO:  There is no more available pages, we need to
+			 * recover. Probably a requeue of the bio is enough.
+			 */
+			BUG_ON(1);
+		}
+	}
+
+#ifdef CONFIG_NVM_DEBUG
+	if (nvm_boundary_checks(dev, rqd->ppa_list, rqd->nr_ppas))
+		BUG_ON(1);
+		/* WARN_ON(1); */
+#endif
+
+out:
+	return ret;
+}
+
+static void pblk_pad_blk(struct pblk *pblk, struct pblk_block *rblk,
+							int nr_free_secs)
+{
+	struct nvm_dev *dev = pblk->dev;
+	struct bio *bio;
+	struct nvm_rq *rqd;
+	struct pblk_ctx *ctx;
+	struct pblk_compl_ctx *c_ctx;
+	void *pad_data;
+	unsigned int bio_len;
+	int nr_secs, err;
+
+	pad_data = kzalloc(pblk->max_write_pgs * dev->sec_size, GFP_KERNEL);
+	if (!pad_data) {
+		pr_err("pblk: could not allocate tear down pad data\n");
+		return;
+	}
+
+	do {
+		nr_secs = (nr_free_secs > pblk->max_write_pgs) ?
+					pblk->max_write_pgs : nr_free_secs;
+
+		rqd = mempool_alloc(pblk->w_rq_pool, GFP_KERNEL);
+		if (!rqd) {
+			pr_err("pblk: could not alloc write req.\n ");
+			goto free_pad_data;
+		}
+		memset(rqd, 0, pblk_w_rq_size);
+		ctx = pblk_set_ctx(pblk, rqd);
+		c_ctx = ctx->c_ctx;
+
+		bio_len = nr_secs * dev->sec_size;
+		bio = bio_map_kern(dev->q, pad_data, bio_len, GFP_KERNEL);
+		if (!bio) {
+			pr_err("pblk: could not alloc tear down bio\n");
+			goto free_rqd;
+		}
+		bio_get(bio);
+
+		bio->bi_iter.bi_sector = 0; /* artificial bio */
+		bio->bi_rw = WRITE;
+		rqd->bio = bio;
+
+		ctx->flags = PBLK_IOTYPE_PAD;
+		c_ctx->sentry = 0;
+		c_ctx->nr_valid = 0;
+		c_ctx->nr_padded = nr_secs;
+
+		if (pblk_setup_pad_rq(pblk, rblk, rqd, ctx)) {
+			pr_err("pblk: could not setup tear down req.\n");
+			goto free_bio;
+		}
+
+		err = nvm_submit_io(dev, rqd);
+		if (err) {
+			pr_err("pblk: I/O submission failed: %d\n", err);
+			goto free_bio;
+		}
+
+		nr_free_secs -= nr_secs;
+	} while (nr_free_secs > 0);
+
+	kfree(pad_data);
+	return;
+
+free_bio:
+	bio_put(bio);
+free_rqd:
+	mempool_free(rqd, pblk->w_rq_pool);
+free_pad_data:
+	kfree(pad_data);
+}
+
+static inline u64 pblk_nr_free_secs(struct pblk *pblk, struct pblk_block *rblk)
+{
+	u64 free_secs = pblk->nr_blk_dsecs;
+
+	spin_lock(&rblk->lock);
+	free_secs -= bitmap_weight(rblk->sector_bitmap, pblk->nr_blk_dsecs);
+	spin_unlock(&rblk->lock);
+
+	return free_secs;
+}
+
+/*
+ * XXX: For now, we pad the whole block. In the future, pad only the pages that
+ * are needed to guarantee that future reads will come, and delegate bringing up
+ * the block for writing to the bring up recovery. Basically, this means
+ * implementing l2p snapshot and in case of power failure, if a block belongs
+ * to a target and it is not closed, scan the OOB area for each page to
+ * recover the state of the block. There should only be NUM_LUNS active blocks
+ * at any moment in time.
+ */
+void pblk_pad_open_blks(struct pblk *pblk)
+{
+	struct pblk_lun *rlun;
+	struct pblk_block *rblk, *trblk;
+	unsigned int i, mod;
+	int nr_free_secs;
+	LIST_HEAD(open_list);
+
+	pblk_for_each_lun(pblk, rlun, i) {
+		spin_lock(&rlun->lock_lists);
+		list_cut_position(&open_list, &rlun->open_list,
+							rlun->open_list.prev);
+		spin_unlock(&rlun->lock_lists);
+
+		list_for_each_entry_safe(rblk, trblk, &open_list, list) {
+			nr_free_secs = pblk_nr_free_secs(pblk, rblk);
+			div_u64_rem(nr_free_secs, pblk->min_write_pgs, &mod);
+			if (mod) {
+				pr_err("pblk: corrupted block\n");
+				continue;
+			}
+
+			pr_debug("pblk: padding %d sectors in blk:%lu\n",
+						nr_free_secs, rblk->parent->id);
+
+			/* empty block - no need for padding */
+			if (nr_free_secs == pblk->nr_blk_dsecs) {
+				pblk_put_blk_unlocked(pblk, rblk);
+				continue;
+			}
+
+			pblk_pad_blk(pblk, rblk, nr_free_secs);
+		}
+
+		spin_lock(&rlun->lock_lists);
+		list_splice(&open_list, &rlun->open_list);
+		spin_unlock(&rlun->lock_lists);
+	}
+
+try:
+	/* Wait until all padding I/Os complete */
+	pblk_for_each_lun(pblk, rlun, i) {
+		spin_lock(&rlun->lock_lists);
+		if (!list_empty(&rlun->open_list)) {
+			spin_unlock(&rlun->lock_lists);
+			schedule();
+			goto try;
+		}
+		spin_unlock(&rlun->lock_lists);
+	}
 }
 
 

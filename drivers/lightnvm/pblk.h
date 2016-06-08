@@ -433,6 +433,12 @@ void pblk_put_blk_unlocked(struct pblk *pblk, struct pblk_block *rblk);
 void pblk_end_io(struct nvm_rq *rqd);
 void pblk_end_sync_bio(struct bio *bio);
 void pblk_free_blks(struct pblk *pblk);
+void pblk_submit_write(struct work_struct *work);
+void pblk_pad_open_blks(struct pblk *pblk);
+struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
+							unsigned long flags);
+void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk,
+								int is_bb);
 
 #ifdef CONFIG_NVM_DEBUG
 void pblk_rb_print_debug(struct pblk_rb *rb);
