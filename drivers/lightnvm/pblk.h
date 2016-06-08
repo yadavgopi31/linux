@@ -440,6 +440,36 @@ struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
 void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk,
 								int is_bb);
 
+/* pblk recovery */
+void pblk_run_recovery(struct pblk *pblk, struct pblk_block *rblk);
+int pblk_recov_setup_end_rq(struct pblk *pblk, struct pblk_ctx *ctx,
+			  struct pblk_rec_ctx *recovery, u64 *comp_bits,
+			  unsigned int c_entries);
+int pblk_recov_read(struct pblk *pblk, struct pblk_block *rblk,
+		    void *recov_page, unsigned int page_size);
+u64 *pblk_recov_get_lba_list(struct pblk *pblk, void *recov_page);
+int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk);
+void pblk_recov_clean_bb_list(struct pblk *pblk, struct pblk_lun *rlun);
+void pblk_close_rblk_queue(struct work_struct *work);
+
+/* pblk gc */
+#define PBLK_GC_TRIES 3
+
+int pblk_gc_init(struct pblk *pblk);
+void pblk_gc_exit(struct pblk *pblk);
+void pblk_gc_queue(struct work_struct *work);
+void pblk_lun_gc(struct work_struct *work);
+int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
+			     u64 *lba_list, unsigned int nr_entries);
+
+static inline int pblk_gc_invalidate_sec(struct pblk_block *rblk,
+					 struct ppa_addr a)
+{
+	rblk->nr_invalid_secs++;
+	return test_and_set_bit(a.ppa, rblk->invalid_bitmap);
+}
+
+
 #ifdef CONFIG_NVM_DEBUG
 void pblk_rb_print_debug(struct pblk_rb *rb);
 #endif
