@@ -913,7 +913,162 @@ err:
 	return -EINVAL;
 }
 
-static struct nvm_tgt_type tt_pblk;
+#ifdef CONFIG_NVM_DEBUG
+static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *buf)
+{
+	struct pblk_lun *rlun;
+	struct pblk_block *rblk;
+	struct pblk_ctx *c;
+	struct pblk_compl_ctx *c_ctx;
+	unsigned int i;
+	ssize_t offset;
+
+	offset = scnprintf(buf, PAGE_SIZE, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
+				atomic_read(&pblk->inflight_writes),
+				atomic_read(&pblk->inflight_reads),
+				atomic_read(&pblk->req_writes),
+				atomic_read(&pblk->nr_flush),
+				atomic_read(&pblk->padded_writes),
+				atomic_read(&pblk->sub_writes),
+				atomic_read(&pblk->sync_writes),
+				atomic_read(&pblk->compl_writes),
+				atomic_read(&pblk->recov_writes),
+				atomic_read(&pblk->recov_gc_writes),
+				atomic_read(&pblk->requeued_writes),
+				atomic_read(&pblk->sync_reads));
+
+	/*
+	pblk_rb_print_debug(&pblk->rwb);
+
+	pblk_for_each_lun(pblk, rlun, i) {
+		pr_info("LUN:%d\n", rlun->parent->id);
+
+		spin_lock(&rlun->lock_lists);
+		/* Print open blocks */ /*
+		list_for_each_entry(rblk, &rlun->open_list, list) {
+			spin_lock(&rblk->lock);
+			pr_info("pblk:open:\tblk:%lu\t%u\t%u\t%u\t%u\t%u\t%u\n",
+					rblk->parent->id,
+					pblk->dev->sec_per_blk,
+					pblk->nr_blk_dsecs,
+					bitmap_weight(rblk->sector_bitmap,
+							pblk->dev->sec_per_blk),
+					bitmap_weight(rblk->sync_bitmap,
+							pblk->dev->sec_per_blk),
+					bitmap_weight(rblk->invalid_bitmap,
+							pblk->dev->sec_per_blk),
+					rblk->nr_invalid_secs);
+			spin_unlock(&rblk->lock);
+		}
+
+#if 0
+		/* Print closed blocks */ /*
+		list_for_each_entry(rblk, &rlun->closed_list, list) {
+			spin_lock(&rblk->lock);
+			if (rblk->sector_bitmap) {
+				pr_info("pblk:closed:\tblk:%lu\t%u\t%u\t%u\n",
+					rblk->parent->id,
+					bitmap_weight(rblk->sector_bitmap,
+							pblk->dev->sec_per_blk),
+					bitmap_weight(rblk->sector_bitmap,
+							pblk->dev->sec_per_blk),
+					bitmap_weight(rblk->invalid_bitmap,
+							pblk->dev->sec_per_blk));
+			} else {
+				pr_info("pblk:closed:\tblk:%lu\tFREE\n",
+					rblk->parent->id);
+			}
+			spin_unlock(&rblk->lock);
+		}
+#endif
+
+		/* Print grown bad blocks not yet retired */ /*
+		list_for_each_entry(rblk, &rlun->bb_list, list) {
+			spin_lock(&rblk->lock);
+			pr_info("pblk:bad:\tblk:%lu\t%u\n",
+				rblk->parent->id,
+				bitmap_weight(rblk->sector_bitmap,
+						pblk->dev->sec_per_blk));
+			spin_unlock(&rblk->lock);
+		}
+
+		spin_unlock(&rlun->lock_lists);
+	}
+
+	/* Print completion queue */ /*
+	list_for_each_entry(c, &pblk->compl_list, list) {
+		c_ctx = c->c_ctx;
+		pr_info("pblk:compl_list:\t%u\t%u\t%u\n",
+			c_ctx->sentry,
+			c_ctx->nr_valid,
+			c_ctx->nr_padded);
+	} */
+
+	return offset;
+}
+#else
+static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *buf)
+{
+	return 0;
+}
+#endif
+
+static struct attribute sys_stats_attr = {
+	.name = "stats",
+	.mode = S_IRUGO
+};
+
+static struct attribute *pblk_attrs[] = {
+	&sys_stats_attr,
+	NULL,
+};
+
+static const struct attribute_group pblk_attr_group = {
+	.attrs		= pblk_attrs,
+};
+
+static ssize_t pblk_sysfs_show(struct nvm_target *t, struct attribute *attr,
+								char *buf)
+{
+	struct pblk *pblk = t->disk->private_data;
+
+	if (strcmp(attr->name, "stats") == 0)
+		return pblk_sysfs_stats(pblk, buf);
+
+	return 0;
+}
+
+static void pblk_sysfs_init(struct nvm_target *t)
+{
+	if (sysfs_create_group(&t->kobj, &pblk_attr_group))
+		pr_warn("%s: failed to create sysfs group\n",
+			t->disk->disk_name);
+}
+
+static void pblk_sysfs_exit(struct nvm_target *t)
+{
+	sysfs_remove_group(&t->kobj, &pblk_attr_group);
+}
+
+static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
+						int lun_begin, int lun_end);
+
+/* physical block device target */
+static struct nvm_tgt_type tt_pblk = {
+	.name		= "pblk",
+	.version	= {1, 0, 0},
+
+	.make_rq	= pblk_make_rq,
+	.capacity	= pblk_capacity,
+	.end_io		= pblk_end_io,
+
+	.init		= pblk_init,
+	.exit		= pblk_exit,
+
+	.sysfs_init	= pblk_sysfs_init,
+	.sysfs_exit	= pblk_sysfs_exit,
+	.sysfs_show	= pblk_sysfs_show,
+};
 
 static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 						int lun_begin, int lun_end)
@@ -1027,117 +1182,6 @@ err:
 	pblk_free(pblk);
 	return ERR_PTR(ret);
 }
-
-#ifdef CONFIG_NVM_DEBUG
-static void pblk_print_debug(void *private)
-{
-	struct pblk *pblk = private;
-	struct pblk_lun *rlun;
-	struct pblk_block *rblk;
-	struct pblk_ctx *c;
-	struct pblk_compl_ctx *c_ctx;
-	unsigned int i;
-
-	pr_info("pblk: %u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
-				atomic_read(&pblk->inflight_writes),
-				atomic_read(&pblk->inflight_reads),
-				atomic_read(&pblk->req_writes),
-				atomic_read(&pblk->nr_flush),
-				atomic_read(&pblk->padded_writes),
-				atomic_read(&pblk->sub_writes),
-				atomic_read(&pblk->sync_writes),
-				atomic_read(&pblk->compl_writes),
-				atomic_read(&pblk->recov_writes),
-				atomic_read(&pblk->recov_gc_writes),
-				atomic_read(&pblk->requeued_writes),
-				atomic_read(&pblk->sync_reads));
-
-	pblk_rb_print_debug(&pblk->rwb);
-
-	pblk_for_each_lun(pblk, rlun, i) {
-		pr_info("LUN:%d\n", rlun->parent->id);
-
-		spin_lock(&rlun->lock_lists);
-		/* Print open blocks */
-		list_for_each_entry(rblk, &rlun->open_list, list) {
-			spin_lock(&rblk->lock);
-			pr_info("pblk:open:\tblk:%lu\t%u\t%u\t%u\t%u\t%u\t%u\n",
-					rblk->parent->id,
-					pblk->dev->sec_per_blk,
-					pblk->nr_blk_dsecs,
-					bitmap_weight(rblk->sector_bitmap,
-							pblk->dev->sec_per_blk),
-					bitmap_weight(rblk->sync_bitmap,
-							pblk->dev->sec_per_blk),
-					bitmap_weight(rblk->invalid_bitmap,
-							pblk->dev->sec_per_blk),
-					rblk->nr_invalid_secs);
-			spin_unlock(&rblk->lock);
-		}
-
-#if 0
-		/* Print closed blocks */
-		list_for_each_entry(rblk, &rlun->closed_list, list) {
-			spin_lock(&rblk->lock);
-			if (rblk->sector_bitmap) {
-				pr_info("pblk:closed:\tblk:%lu\t%u\t%u\t%u\n",
-					rblk->parent->id,
-					bitmap_weight(rblk->sector_bitmap,
-							pblk->dev->sec_per_blk),
-					bitmap_weight(rblk->sector_bitmap,
-							pblk->dev->sec_per_blk),
-					bitmap_weight(rblk->invalid_bitmap,
-							pblk->dev->sec_per_blk));
-			} else {
-				pr_info("pblk:closed:\tblk:%lu\tFREE\n",
-					rblk->parent->id);
-			}
-			spin_unlock(&rblk->lock);
-		}
-#endif
-
-		/* Print grown bad blocks not yet retired */
-		list_for_each_entry(rblk, &rlun->bb_list, list) {
-			spin_lock(&rblk->lock);
-			pr_info("pblk:bad:\tblk:%lu\t%u\n",
-				rblk->parent->id,
-				bitmap_weight(rblk->sector_bitmap,
-						pblk->dev->sec_per_blk));
-			spin_unlock(&rblk->lock);
-		}
-
-		spin_unlock(&rlun->lock_lists);
-	}
-
-	/* Print completion queue */
-	list_for_each_entry(c, &pblk->compl_list, list) {
-		c_ctx = c->c_ctx;
-		pr_info("pblk:compl_list:\t%u\t%u\t%u\n",
-			c_ctx->sentry,
-			c_ctx->nr_valid,
-			c_ctx->nr_padded);
-	}
-}
-#else
-static void pblk_print_debug(void *private)
-{
-}
-#endif
-
-/* physical block device target */
-static struct nvm_tgt_type tt_pblk = {
-	.name		= "pblk",
-	.version	= {1, 0, 0},
-
-	.make_rq	= pblk_make_rq,
-	.capacity	= pblk_capacity,
-	.end_io		= pblk_end_io,
-
-	.init		= pblk_init,
-	.exit		= pblk_exit,
-
-	.print_debug	= pblk_print_debug,
-};
 
 static int __init pblk_module_init(void)
 {

@@ -1545,5 +1545,3 @@ int pblk_alloc_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 
 	return 0;
 }
-
-
