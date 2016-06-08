@@ -332,7 +332,7 @@ int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
 	off = 0;
 	read_left = nr_entries;
 	do {
-		secs_to_gc = pblk_calc_secs_to_sync(pblk, read_left, 0);
+		secs_to_gc = (read_left > max) ? max : read_left;
 		ignored = 0;
 
 		/* Discard invalid addresses for current GC I/O */
@@ -428,6 +428,8 @@ write_retry:
 		if (!pblk_write_list_to_cache(pblk, bio, PBLK_IOTYPE_REF,
 					&lba_list[off], ref_buf, secs_to_gc,
 					secs_in_disk, &ret)) {
+			if (pblk_rb_count(&pblk->rwb) >= pblk->min_write_pgs)
+				pblk_write_kick(pblk);
 			schedule();
 			goto write_retry;
 		}
@@ -557,15 +559,13 @@ next_lba_list:
 						pblk->nr_blk_dsecs, bit);
 		gc_lba_list[nr_ppas] = lba_list[bit];
 
+		nr_ppas++;
 		bit++;
 		if (bit > pblk->nr_blk_dsecs)
 			goto prepare_ppas;
-
-		nr_ppas++;
 	} while (nr_ppas < PBLK_MAX_REQ_ADDRS);
 
 prepare_ppas:
-	nr_ppas++;
 	moved = pblk_gc_move_valid_secs(pblk, rblk, gc_lba_list, nr_ppas);
 	if (moved != nr_ppas) {
 		pr_err("pblk: could not GC all sectors:blk:%lu, GC:%d/%d/%d\n",
@@ -602,8 +602,7 @@ void pblk_lun_gc(struct work_struct *work)
 	struct pblk_block_ws *blk_ws;
 	unsigned int nr_blocks_need;
 
-	nr_blocks_need = pblk->nr_luns *
-				(pblk->dev->blks_per_lun / GC_LIMIT_INVERSE);
+	nr_blocks_need = pblk->dev->blks_per_lun / GC_LIMIT_INVERSE;
 
 	if (nr_blocks_need < pblk->nr_luns)
 		nr_blocks_need = pblk->nr_luns;
@@ -662,7 +661,7 @@ static void pblk_gc_timer(unsigned long data)
 	struct pblk *pblk = (struct pblk *)data;
 
 	pblk_gc_kick(pblk);
-	mod_timer(&pblk->gc_timer, jiffies + msecs_to_jiffies(10));
+	mod_timer(&pblk->gc_timer, jiffies + msecs_to_jiffies(GC_TIME_MSECS));
 }
 
 int pblk_gc_init(struct pblk *pblk)

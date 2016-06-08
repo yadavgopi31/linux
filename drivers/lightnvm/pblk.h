@@ -32,7 +32,7 @@
 
 /* Run only GC if less than 1/X blocks are free */
 #define GC_LIMIT_INVERSE 10
-#define GC_TIME_SECS 100
+#define GC_TIME_MSECS 5000
 
 #define PBLK_SECTOR (512)
 #define PBLK_EXPOSED_PAGE_SIZE (4096)
