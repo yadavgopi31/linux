@@ -383,17 +383,26 @@ static int pblk_submit_read(struct pblk *pblk, struct bio *bio,
 	return ret;
 }
 
-static int pblk_submit_io(struct pblk *pblk, struct bio *bio,
+static int pblk_submit_io_checks(struct pblk *pblk, struct bio *bio,
 							unsigned long flags)
 {
 	int bio_size = bio_sectors(bio) << 9;
 	int is_flush = (bio->bi_rw & (REQ_FLUSH | REQ_FUA));
 
 	if ((bio_size < pblk->dev->sec_size) && (!is_flush))
-		return NVM_IO_ERR;
-	else if (bio_size > pblk->dev->max_rq_size)
-		return NVM_IO_ERR;
+		return 1;
 
+	if (bio_size > pblk->dev->max_rq_size)
+		return 1;
+
+	return 0;
+}
+
+static int pblk_submit_io(struct pblk *pblk, struct bio *bio,
+							unsigned long flags)
+{
+	if (pblk_submit_io_checks(pblk, bio))
+		return NVM_IO_ERR;
 	if (bio_rw(bio) == READ)
 		return pblk_submit_read(pblk, bio, flags);
 
@@ -465,83 +474,6 @@ static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 
 #ifdef CONFIG_NVM_DEBUG
 	if (nvm_boundary_checks(pblk->dev, rqd->ppa_list, rqd->nr_ppas))
-		BUG_ON(1);
-		/* WARN_ON(1); */
-#endif
-
-out:
-	return ret;
-}
-
-static int pblk_setup_pad_rq(struct pblk *pblk, struct pblk_block *rblk,
-				struct nvm_rq *rqd, struct pblk_ctx *ctx)
-{
-	struct nvm_dev *dev = pblk->dev;
-	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
-	unsigned int valid_secs = c_ctx->nr_valid;
-	unsigned int padded_secs = c_ctx->nr_padded;
-	struct pblk_lun *rlun = rblk->rlun;
-	unsigned int nr_secs = valid_secs + padded_secs;
-	struct pblk_sec_meta *meta;
-	int min = pblk->min_write_pgs;
-	int i;
-	int ret = 0;
-
-	ret = pblk_alloc_w_rq(pblk, rqd, ctx, nr_secs);
-	if (ret)
-		goto out;
-
-	meta = rqd->meta_list;
-
-	if (unlikely(nr_secs == 1)) {
-		/*
-		 * Single sector path - this path is highly improbable since
-		 * controllers typically deal with multi-sector and multi-plane
-		 * pages. This path is though useful for testing on QEMU
-		 */
-		BUG_ON(dev->sec_per_pl != 1);
-		BUG_ON(padded_secs != 0);
-
-		spin_lock(&rlun->lock);
-		ret = pblk_map_page(pblk, rblk, c_ctx->sentry, &rqd->ppa_addr,
-								&meta[0], 1, 0);
-		spin_unlock(&rlun->lock);
-
-		/* A page mapping counts as one inflight I/O */
-		down(&pblk->ch_list[rlun->ch].ch_sm);
-
-		if (ret) {
-			/*
-			 * TODO:  There is no more available pages, we need to
-			 * recover. Probably a requeue of the bio is enough.
-			 */
-			BUG_ON(1);
-		}
-
-		goto out;
-	}
-
-	for (i = 0; i < nr_secs; i += min) {
-		spin_lock(&rlun->lock);
-		ret = pblk_map_page(pblk, rblk, c_ctx->sentry + i,
-						&rqd->ppa_list[i],
-						&meta[i], min, 0);
-		spin_unlock(&rlun->lock);
-
-		/* A page mapping counts as one inflight I/O */
-		down(&pblk->ch_list[rlun->ch].ch_sm);
-
-		if (ret) {
-			/*
-			 * TODO:  There is no more available pages, we need to
-			 * recover. Probably a requeue of the bio is enough.
-			 */
-			BUG_ON(1);
-		}
-	}
-
-#ifdef CONFIG_NVM_DEBUG
-	if (nvm_boundary_checks(dev, rqd->ppa_list, rqd->nr_ppas))
 		BUG_ON(1);
 		/* WARN_ON(1); */
 #endif
@@ -1034,6 +966,83 @@ static void pblk_flush_writer(struct pblk *pblk)
 		pr_err("pblk: flush sync write failed (%u)\n", bio->bi_error);
 
 	bio_put(bio);
+}
+
+static int pblk_setup_pad_rq(struct pblk *pblk, struct pblk_block *rblk,
+				struct nvm_rq *rqd, struct pblk_ctx *ctx)
+{
+	struct nvm_dev *dev = pblk->dev;
+	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
+	unsigned int valid_secs = c_ctx->nr_valid;
+	unsigned int padded_secs = c_ctx->nr_padded;
+	struct pblk_lun *rlun = rblk->rlun;
+	unsigned int nr_secs = valid_secs + padded_secs;
+	struct pblk_sec_meta *meta;
+	int min = pblk->min_write_pgs;
+	int i;
+	int ret = 0;
+
+	ret = pblk_alloc_w_rq(pblk, rqd, ctx, nr_secs);
+	if (ret)
+		goto out;
+
+	meta = rqd->meta_list;
+
+	if (unlikely(nr_secs == 1)) {
+		/*
+		 * Single sector path - this path is highly improbable since
+		 * controllers typically deal with multi-sector and multi-plane
+		 * pages. This path is though useful for testing on QEMU
+		 */
+		BUG_ON(dev->sec_per_pl != 1);
+		BUG_ON(padded_secs != 0);
+
+		spin_lock(&rlun->lock);
+		ret = pblk_map_page(pblk, rblk, c_ctx->sentry, &rqd->ppa_addr,
+								&meta[0], 1, 0);
+		spin_unlock(&rlun->lock);
+
+		/* A page mapping counts as one inflight I/O */
+		down(&pblk->ch_list[rlun->ch].ch_sm);
+
+		if (ret) {
+			/*
+			 * TODO:  There is no more available pages, we need to
+			 * recover. Probably a requeue of the bio is enough.
+			 */
+			BUG_ON(1);
+		}
+
+		goto out;
+	}
+
+	for (i = 0; i < nr_secs; i += min) {
+		spin_lock(&rlun->lock);
+		ret = pblk_map_page(pblk, rblk, c_ctx->sentry + i,
+						&rqd->ppa_list[i],
+						&meta[i], min, 0);
+		spin_unlock(&rlun->lock);
+
+		/* A page mapping counts as one inflight I/O */
+		down(&pblk->ch_list[rlun->ch].ch_sm);
+
+		if (ret) {
+			/*
+			 * TODO:  There is no more available pages, we need to
+			 * recover. Probably a requeue of the bio is enough.
+			 */
+			BUG_ON(1);
+		}
+	}
+
+#ifdef CONFIG_NVM_DEBUG
+	if (nvm_boundary_checks(dev, rqd->ppa_list, rqd->nr_ppas))
+		BUG_ON(1);
+		/* WARN_ON(1); */
+#endif
+
+out:
+	return ret;
 }
 
 static void pblk_pad_blk(struct pblk *pblk, struct pblk_block *rblk,
