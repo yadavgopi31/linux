@@ -111,13 +111,10 @@ int pblk_read_rq(struct pblk *pblk, struct bio *bio, struct nvm_rq *rqd,
 	}
 
 	rqd->ppa_addr = gp->ppa;
-
 #ifdef CONFIG_NVM_DEBUG
 	atomic_inc(&pblk->inflight_reads);
 #endif
-
 	return NVM_IO_OK;
-
 done:
 	return NVM_IO_DONE;
 }
