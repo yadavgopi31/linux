@@ -49,4 +49,13 @@ config NVM_PBLK
 	host. The target assumes the device exposes raw flash and must be
 	explicitly managed by the host.
 
+config NVM_PBLK_NO_RECOV
+	bool "PBLK without L2P scan recovery"
+	depends on NVM_PBLK
+	---help---
+	Disables scan recovery when instantiating a new pblk target. Scan
+	recovery happens when the L2P table cannot be recovered from snapshot or
+	the snapshot is corrupt. Scan recovery scans the blocks owned by the
+	target and reconstructs the L2P table.
+
 endif # NVM

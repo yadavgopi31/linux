@@ -1225,15 +1225,18 @@ static sector_t pblk_capacity(void *private)
 
 static int pblk_blocks_init(struct pblk *pblk)
 {
+#ifndef CONFIG_NVM_PBLK_NO_RECOV
 	struct pblk_lun *rlun;
 	struct pblk_block *rblk;
 	int lun, blk;
+#endif
 	int ret = 0;
 
 	/* TODO: Try to recover from l2p snapshot. Only perform scanning in
 	 * case of failure
 	 */
 
+#ifndef CONFIG_NVM_PBLK_NO_RECOV
 	for (lun = 0; lun < pblk->nr_luns; lun++) {
 		rlun = &pblk->luns[lun];
 		for (blk = 0; blk < pblk->dev->blks_per_lun; blk++) {
@@ -1245,6 +1248,7 @@ static int pblk_blocks_init(struct pblk *pblk)
 			}
 		}
 	}
+#endif
 
 out:
 	return ret;
