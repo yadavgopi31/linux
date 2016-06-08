@@ -365,8 +365,8 @@ void *pblk_rb_entries_ref(struct pblk_rb *rb);
 
 void pblk_rb_write_init(struct pblk_rb *rb);
 unsigned long pblk_rb_write_pos(struct pblk_rb *rb);
-int pblk_rb_write_entry(struct pblk_rb *rb, void *data, struct pblk_w_ctx w_ctx,
-			unsigned int pos);
+void pblk_rb_write_entry(struct pblk_rb *rb, void *data,
+			 struct pblk_w_ctx w_ctx, unsigned int pos);
 struct pblk_w_ctx *pblk_rb_w_ctx(struct pblk_rb *rb, unsigned long pos);
 void pblk_rb_write_commit(struct pblk_rb *rb, unsigned int nr_entries);
 void pblk_rb_write_rollback(struct pblk_rb *rb);

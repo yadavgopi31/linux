@@ -391,16 +391,14 @@ void pblk_rb_sync_l2p(struct pblk_rb *rb)
  * Typically, 4KB data chunks coming from a bio will be copied to the ring
  * buffer, thus the write will fail if not all incoming data can be copied.
  *
- * Return: 0 on success, -ENOMEM on failure
  */
-int pblk_rb_write_entry(struct pblk_rb *rb, void *data, struct pblk_w_ctx w_ctx,
+void pblk_rb_write_entry(struct pblk_rb *rb, void *data, struct pblk_w_ctx w_ctx,
 							unsigned int pos)
 {
 	struct pblk_rb_entry *entry;
 	unsigned long size = rb->seg_size;
 	unsigned int ring_pos = (pos & (rb->nr_entries - 1));
 	int flags;
-	int ret = 0;
 
 	entry = &rb->entries[ring_pos];
 	memcpy_torb(rb, entry->data, data, size);
@@ -415,9 +413,6 @@ int pblk_rb_write_entry(struct pblk_rb *rb, void *data, struct pblk_w_ctx w_ctx,
 	flags = READ_ONCE(entry->w_ctx.flags);
 	flags |= PBLK_VALID_DATA;
 	smp_store_release(&entry->w_ctx.flags, flags);
-
-out:
-	return ret;
 }
 
 void pblk_rb_write_init(struct pblk_rb *rb)
