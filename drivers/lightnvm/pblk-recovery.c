@@ -15,8 +15,6 @@
  */
 
 #include "pblk.h"
-#include "pblk-recovery.h"
-#include "pblk-gc.h"
 
 /*
  * Write Retry - These set of functions implement recovery mechanisms for a

@@ -16,8 +16,6 @@
  */
 
 #include "pblk.h"
-#include "pblk-gc.h"
-#include "pblk-recovery.h"
 
 static void pblk_free_gc_rqd(struct pblk *pblk, struct nvm_rq *rqd)
 {

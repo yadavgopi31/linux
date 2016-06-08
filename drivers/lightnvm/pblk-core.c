@@ -15,8 +15,6 @@
  */
 
 #include "pblk.h"
-#include "pblk-gc.h"
-#include "pblk-recovery.h"
 
 static void pblk_bio_free_pages(struct pblk *pblk, struct bio *bio, int off,
 				int nr_pages)

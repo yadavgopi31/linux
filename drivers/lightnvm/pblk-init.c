@@ -19,8 +19,6 @@
  */
 
 #include "pblk.h"
-#include "pblk-gc.h"
-#include "pblk-recovery.h"
 
 static struct kmem_cache *pblk_blk_ws_cache, *pblk_rec_cache, *pblk_r_rq_cache,
 							*pblk_w_rq_cache;
