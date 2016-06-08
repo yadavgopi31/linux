@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2016 CNEX Labs
- * Initial release: Matias Bjorling <m@bjorling.me>
- *		  : Javier Gonzalez <jg@lightnvm.io>
+ * Initial release: Javier Gonzalez <jg@lightnvm.io>
+ *                  Matias Bjorling <m@bjorling.me>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License version
