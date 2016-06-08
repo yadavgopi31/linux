@@ -289,10 +289,6 @@ int pblk_submit_read_io(struct pblk *pblk, struct bio *bio,
 	return NVM_IO_OK;
 }
 
-#define pblk_for_each_lun(pblk, rlun, i) \
-		for ((i) = 0, rlun = &(pblk)->luns[0]; \
-			(i) < (pblk)->nr_luns; (i)++, rlun = &(pblk)->luns[(i)])
-
 static struct pblk_lun *get_next_lun(struct pblk *pblk)
 {
 	int next = atomic_inc_return(&pblk->next_lun);

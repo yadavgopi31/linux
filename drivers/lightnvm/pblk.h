@@ -41,6 +41,10 @@
 
 #define NR_PHY_IN_LOG (PBLK_EXPOSED_PAGE_SIZE / PBLK_SECTOR)
 
+#define pblk_for_each_lun(pblk, rlun, i) \
+		for ((i) = 0, rlun = &(pblk)->luns[0]; \
+			(i) < (pblk)->nr_luns; (i)++, rlun = &(pblk)->luns[(i)])
+
 enum {
 	/* IO Types */
 	PBLK_IOTYPE_NONE = 0,
