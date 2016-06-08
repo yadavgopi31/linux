@@ -916,11 +916,6 @@ err:
 #ifdef CONFIG_NVM_DEBUG
 static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *buf)
 {
-	struct pblk_lun *rlun;
-	struct pblk_block *rblk;
-	struct pblk_ctx *c;
-	struct pblk_compl_ctx *c_ctx;
-	unsigned int i;
 	ssize_t offset;
 
 	offset = scnprintf(buf, PAGE_SIZE, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
@@ -955,15 +950,7 @@ static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *buf)
 
 		spin_unlock(&rlun->lock_lists);
 	}
-
-	/* Print completion queue */ /*
-	list_for_each_entry(c, &pblk->compl_list, list) {
-		c_ctx = c->c_ctx;
-		pr_info("pblk:compl_list:\t%u\t%u\t%u\n",
-			c_ctx->sentry,
-			c_ctx->nr_valid,
-			c_ctx->nr_padded);
-	} */
+	*/
 
 	return offset;
 }
