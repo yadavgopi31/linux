@@ -63,20 +63,10 @@ err:
 	return -1;
 }
 
-
 int pblk_read_from_cache(struct pblk *pblk, struct bio *bio,
-			   struct ppa_addr ppa)
+			 struct ppa_addr ppa)
 {
-	u64 cacheline;
-	int read = 0;
-
-	cacheline = nvm_addr_to_cacheline(ppa);
-	if (!pblk_rb_copy_to_bio(&pblk->rwb, bio, cacheline))
-		goto out;
-
-	read = 1;
-out:
-	return read;
+	return pblk_rb_copy_to_bio(&pblk->rwb, bio, nvm_addr_to_cacheline(ppa));
 }
 
 static int pblk_try_read_from_cache(struct pblk *pblk, struct bio *bio,
