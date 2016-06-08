@@ -6,4 +6,4 @@ obj-$(CONFIG_NVM)		:= core.o sysblk.o
 obj-$(CONFIG_NVM_GENNVM) 	+= gennvm.o
 obj-$(CONFIG_NVM_RRPC)		+= rrpc.o
 obj-$(CONFIG_NVM_PBLK)		+= pblk.o
-pblk-y				:= pblk-core.o pblk-lib.o pblk-rb.o pblk-gc.o pblk-recovery.o
+pblk-y				:= pblk-init.o pblk-core.o pblk-rb.o pblk-gc.o pblk-recovery.o
