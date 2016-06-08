@@ -943,45 +943,6 @@ static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *buf)
 	pblk_for_each_lun(pblk, rlun, i) {
 		pr_info("LUN:%d\n", rlun->parent->id);
 
-		spin_lock(&rlun->lock_lists);
-		/* Print open blocks */ /*
-		list_for_each_entry(rblk, &rlun->open_list, list) {
-			spin_lock(&rblk->lock);
-			pr_info("pblk:open:\tblk:%lu\t%u\t%u\t%u\t%u\t%u\t%u\n",
-					rblk->parent->id,
-					pblk->dev->sec_per_blk,
-					pblk->nr_blk_dsecs,
-					bitmap_weight(rblk->sector_bitmap,
-							pblk->dev->sec_per_blk),
-					bitmap_weight(rblk->sync_bitmap,
-							pblk->dev->sec_per_blk),
-					bitmap_weight(rblk->invalid_bitmap,
-							pblk->dev->sec_per_blk),
-					rblk->nr_invalid_secs);
-			spin_unlock(&rblk->lock);
-		}
-
-#if 0
-		/* Print closed blocks */ /*
-		list_for_each_entry(rblk, &rlun->closed_list, list) {
-			spin_lock(&rblk->lock);
-			if (rblk->sector_bitmap) {
-				pr_info("pblk:closed:\tblk:%lu\t%u\t%u\t%u\n",
-					rblk->parent->id,
-					bitmap_weight(rblk->sector_bitmap,
-							pblk->dev->sec_per_blk),
-					bitmap_weight(rblk->sector_bitmap,
-							pblk->dev->sec_per_blk),
-					bitmap_weight(rblk->invalid_bitmap,
-							pblk->dev->sec_per_blk));
-			} else {
-				pr_info("pblk:closed:\tblk:%lu\tFREE\n",
-					rblk->parent->id);
-			}
-			spin_unlock(&rblk->lock);
-		}
-#endif
-
 		/* Print grown bad blocks not yet retired */ /*
 		list_for_each_entry(rblk, &rlun->bb_list, list) {
 			spin_lock(&rblk->lock);
@@ -1006,8 +967,46 @@ static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *buf)
 
 	return offset;
 }
+
+static ssize_t pblk_sysfs_blocks(struct pblk *pblk, char *buf)
+{
+	struct pblk_lun *rlun;
+	struct pblk_block *rblk;
+	int i;
+	ssize_t sz = 0;
+
+	pblk_for_each_lun(pblk, rlun, i) {
+		sz += sprintf(buf + sz, "LUN:%d\n", rlun->parent->id);
+
+		spin_lock(&rlun->lock_lists);
+		/* Print open blocks */
+		list_for_each_entry(rblk, &rlun->open_list, list) {
+			spin_lock(&rblk->lock);
+			sz += sprintf(buf + sz,
+					"open:\tblk:%lu\t%u\t%u\t%u\t%u\t%u\t%u\n",
+					rblk->parent->id,
+					pblk->dev->sec_per_blk,
+					pblk->nr_blk_dsecs,
+					bitmap_weight(rblk->sector_bitmap,
+							pblk->dev->sec_per_blk),
+					bitmap_weight(rblk->sync_bitmap,
+							pblk->dev->sec_per_blk),
+					bitmap_weight(rblk->invalid_bitmap,
+							pblk->dev->sec_per_blk),
+					rblk->nr_invalid_secs);
+			spin_unlock(&rblk->lock);
+		}
+	}
+
+	return sz;
+}
 #else
 static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *buf)
+{
+	return 0;
+}
+
+static ssize_t pblk_sysfs_blocks(struct pblk *pblk, char *buf)
 {
 	return 0;
 }
@@ -1018,8 +1017,14 @@ static struct attribute sys_stats_attr = {
 	.mode = S_IRUGO
 };
 
+static struct attribute sys_blocks_attr = {
+	.name = "blocks",
+	.mode = S_IRUGO
+};
+
 static struct attribute *pblk_attrs[] = {
 	&sys_stats_attr,
+	&sys_blocks_attr,
 	NULL,
 };
 
@@ -1034,6 +1039,8 @@ static ssize_t pblk_sysfs_show(struct nvm_target *t, struct attribute *attr,
 
 	if (strcmp(attr->name, "stats") == 0)
 		return pblk_sysfs_stats(pblk, buf);
+	if (strcmp(attr->name, "blocks") == 0)
+		return pblk_sysfs_blocks(pblk, buf);
 
 	return 0;
 }

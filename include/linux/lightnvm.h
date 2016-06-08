@@ -482,7 +482,6 @@ typedef void (nvm_tgt_sysfs_init_fn)(struct nvm_target *);
 typedef void (nvm_tgt_sysfs_exit_fn)(struct nvm_target *);
 typedef ssize_t(nvm_tgt_sysfs_show_fn)(struct nvm_target *,
 				     struct attribute *, char *);
-typedef void (nvm_tgt_print_debug_fn)(void *);
 
 struct nvm_tgt_type {
 	const char *name;
@@ -500,9 +499,6 @@ struct nvm_tgt_type {
 	nvm_tgt_sysfs_init_fn *sysfs_init;
 	nvm_tgt_sysfs_exit_fn *sysfs_exit;
 	nvm_tgt_sysfs_show_fn *sysfs_show;
-
-	/* debugging */
-	nvm_tgt_print_debug_fn *print_debug;
 
 	/* For internal use */
 	struct list_head list;
