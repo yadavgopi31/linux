@@ -1198,8 +1198,8 @@ static void pblk_exit(void *private)
 
 	down_write(&pblk_lock);
 	flush_workqueue(pblk->krqd_wq);
-	pblk_gc_exit(pblk);
 	pblk_tear_down(pblk);
+	pblk_gc_exit(pblk);
 	pblk_free(pblk);
 	up_write(&pblk_lock);
 }
