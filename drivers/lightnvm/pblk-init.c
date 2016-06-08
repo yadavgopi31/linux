@@ -1147,7 +1147,6 @@ static struct nvm_tgt_type tt_pblk = {
 
 static int __init pblk_module_init(void)
 {
-	printk("pblk: initialized\n");
 	return nvm_register_tgt_type(&tt_pblk);
 }
 
