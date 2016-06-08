@@ -82,11 +82,6 @@ struct pblk_sec_meta {
 	u64 reserved;
 };
 
-struct pblk_locked_list {
-	struct list_head lock_list;
-	spinlock_t lock;
-};
-
 /* Buffer allocated after counter */
 struct pblk_kref_buf {
 	struct kref ref;
