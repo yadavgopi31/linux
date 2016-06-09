@@ -57,7 +57,7 @@ static int pblk_submit_io_checks(struct pblk *pblk, struct bio *bio)
 }
 
 static int pblk_submit_io(struct pblk *pblk, struct bio *bio,
-							unsigned long flags)
+			  unsigned long flags)
 {
 	if (pblk_submit_io_checks(pblk, bio))
 		return NVM_IO_ERR;
@@ -188,7 +188,7 @@ static int pblk_rwb_init(struct pblk *pblk)
 		return -ENOMEM;
 	}
 
-	/* Assume no grace area for now */
+	/* Assume no grace area for now - only support for SLC and MLC */
 	grace_area_sz = 0;
 	power_size = get_count_order(nr_entries);
 	power_seg_sz = get_count_order(dev->sec_size);
@@ -467,9 +467,7 @@ static void pblk_tear_down(struct pblk *pblk)
 
 	pr_debug("pblk: consistent tear down\n");
 
-	/* TODO:
-	 *  - Save FTL snapshot for fast recovery
-	 */
+	/* TODO: Save FTL snapshot for fast recovery */
 }
 
 static void pblk_exit(void *private)
@@ -510,13 +508,13 @@ static int pblk_blocks_init(struct pblk *pblk)
 	int lun, blk;
 	int ret = 0;
 
-#ifdef CONFIG_NVM_PBLK_NO_RECOV
-	return 0;
-#endif
-
 	/* TODO: Try to recover from l2p snapshot. Only perform scanning in
 	 * case of failure
 	 */
+
+#ifdef CONFIG_NVM_PBLK_NO_RECOV
+	return 0;
+#endif
 
 	for (lun = 0; lun < pblk->nr_luns; lun++) {
 		rlun = &pblk->luns[lun];
@@ -574,24 +572,24 @@ static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *buf)
 {
 	ssize_t offset;
 
-	offset = scnprintf(buf, PAGE_SIZE, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
-				atomic_read(&pblk->inflight_writes),
-				atomic_read(&pblk->inflight_reads),
-				atomic_read(&pblk->req_writes),
-				atomic_read(&pblk->nr_flush),
-				atomic_read(&pblk->padded_writes),
-				atomic_read(&pblk->sub_writes),
-				atomic_read(&pblk->sync_writes),
-				atomic_read(&pblk->compl_writes),
-				atomic_read(&pblk->recov_writes),
-				atomic_read(&pblk->recov_gc_writes),
-				atomic_read(&pblk->requeued_writes),
-				atomic_read(&pblk->sync_reads));
+	offset = scnprintf(buf, PAGE_SIZE,
+			"%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
+			atomic_read(&pblk->inflight_writes),
+			atomic_read(&pblk->inflight_reads),
+			atomic_read(&pblk->req_writes),
+			atomic_read(&pblk->nr_flush),
+			atomic_read(&pblk->padded_writes),
+			atomic_read(&pblk->sub_writes),
+			atomic_read(&pblk->sync_writes),
+			atomic_read(&pblk->compl_writes),
+			atomic_read(&pblk->recov_writes),
+			atomic_read(&pblk->recov_gc_writes),
+			atomic_read(&pblk->requeued_writes),
+			atomic_read(&pblk->sync_reads));
 
 	/*
-	pblk_rb_print_debug(&pblk->rwb);
-
-	*/
+	 * TODO: pblk_rb_print_debug(&pblk->rwb);
+	 */
 
 	return offset;
 }
@@ -610,17 +608,17 @@ static ssize_t pblk_sysfs_open_blks(struct pblk *pblk, char *buf)
 		list_for_each_entry(rblk, &rlun->open_list, list) {
 			spin_lock(&rblk->lock);
 			sz += sprintf(buf + sz,
-					"open:\tblk:%lu\t%u\t%u\t%u\t%u\t%u\t%u\n",
-					rblk->parent->id,
-					pblk->dev->sec_per_blk,
-					pblk->nr_blk_dsecs,
-					bitmap_weight(rblk->sector_bitmap,
+				"open:\tblk:%lu\t%u\t%u\t%u\t%u\t%u\t%u\n",
+				rblk->parent->id,
+				pblk->dev->sec_per_blk,
+				pblk->nr_blk_dsecs,
+				bitmap_weight(rblk->sector_bitmap,
 							pblk->dev->sec_per_blk),
-					bitmap_weight(rblk->sync_bitmap,
+				bitmap_weight(rblk->sync_bitmap,
 							pblk->dev->sec_per_blk),
-					bitmap_weight(rblk->invalid_bitmap,
+				bitmap_weight(rblk->invalid_bitmap,
 							pblk->dev->sec_per_blk),
-					rblk->nr_invalid_secs);
+				rblk->nr_invalid_secs);
 			spin_unlock(&rblk->lock);
 		}
 		spin_unlock(&rlun->lock_lists);
@@ -699,7 +697,7 @@ static const struct attribute_group pblk_attr_group = {
 };
 
 static ssize_t pblk_sysfs_show(struct nvm_target *t, struct attribute *attr,
-								char *buf)
+			       char *buf)
 {
 	struct pblk *pblk = t->disk->private_data;
 
@@ -726,7 +724,7 @@ static void pblk_sysfs_exit(struct nvm_target *t)
 }
 
 static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
-						int lun_begin, int lun_end);
+		       int lun_begin, int lun_end);
 
 /* physical block device target */
 static struct nvm_tgt_type tt_pblk = {
@@ -746,7 +744,7 @@ static struct nvm_tgt_type tt_pblk = {
 };
 
 static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
-						int lun_begin, int lun_end)
+		       int lun_begin, int lun_end)
 {
 	struct request_queue *bqueue = dev->q;
 	struct request_queue *tqueue = tdisk->queue;
@@ -754,7 +752,9 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	sector_t soffset;
 	int ret;
 
-/*	if (dev->identity.dom & NVM_RSP_L2P) {
+/*
+ *	TODO: Check
+ *	if (dev->identity.dom & NVM_RSP_L2P) {
 		pr_err("nvm: pblk: device has device-side translation table. Target not supported. (%x)\n",
 							dev->identity.dom);
 		return ERR_PTR(-EINVAL);
