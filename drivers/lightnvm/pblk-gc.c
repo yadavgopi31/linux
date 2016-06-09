@@ -31,10 +31,10 @@ static void pblk_free_gc_rqd(struct pblk *pblk, struct nvm_rq *rqd)
 }
 
 static int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
-				      unsigned long flags, u64 *lba_list,
-				      struct pblk_kref_buf *ref_buf,
-				      unsigned int nr_secs,
-				      unsigned int nr_rec_secs, int *ret_val)
+				    unsigned long flags, u64 *lba_list,
+				    struct pblk_kref_buf *ref_buf,
+				    unsigned int nr_secs,
+				    unsigned int nr_rec_secs, int *ret_val)
 {
 	struct pblk_w_ctx w_ctx;
 	struct ppa_addr ppa;
@@ -125,7 +125,6 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 			unsigned long flags, unsigned long *read_bitmap)
 {
 	/* int is_gc = *flags & PBLK_IOTYPE_GC; */
-	/* int locked = 0; */
 	sector_t lba;
 	int advanced_bio = 0;
 	int i, j = 0;
@@ -196,10 +195,10 @@ static int pblk_read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 }
 
 static int pblk_submit_read_list(struct pblk *pblk, struct bio *bio,
-				   struct nvm_rq *rqd, u64 *lba_list,
-				   unsigned int nr_secs,
-				   unsigned int nr_rec_secs,
-				   unsigned long flags)
+				 struct nvm_rq *rqd, u64 *lba_list,
+				 unsigned int nr_secs,
+				 unsigned int nr_rec_secs,
+				 unsigned long flags)
 {
 	struct pblk_r_ctx *r_ctx = nvm_rq_to_pdu(rqd);
 	unsigned long read_bitmap; /* Max 64 ppas per request */
@@ -253,8 +252,7 @@ static int pblk_submit_read_list(struct pblk *pblk, struct bio *bio,
 
 		ppa_list = (rqd->nr_ppas > 1) ? rqd->ppa_list : &rqd->ppa_addr;
 		if (nvm_boundary_checks(pblk->dev, ppa_list, rqd->nr_ppas))
-			BUG_ON(1);
-			/* WARN_ON(1); */
+			WARN_ON(1);
 #endif
 		ret = pblk_submit_read_io(pblk, bio, rqd, flags);
 		if (ret) {
@@ -296,7 +294,7 @@ fail_meta_free:
  *   further execution until the operation is complete.
  */
 int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
-			     u64 *lba_list, unsigned int nr_entries)
+			    u64 *lba_list, unsigned int nr_entries)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct request_queue *q = dev->q;
@@ -350,7 +348,8 @@ int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
 			 *
 			 * The same applies for an entry in cache; the
 			 * backpointer takes care of requeuing entries
-			 * mapped to a bad block. This is to avoid double GC.
+			 * mapped to a bad block. This is to avoid double GC
+			 * when doing recovery.
 			 */
 			spin_lock(&pblk->trans_lock);
 			gp = &pblk->trans_map[lba];
@@ -483,12 +482,11 @@ void pblk_gc_queue(struct work_struct *work)
 							rblk->parent->id);
 }
 
-
 /* the block with highest number of invalid pages, will be in the beginning
  * of the list
  */
 static struct pblk_block *rblock_max_invalid(struct pblk_block *ra,
-							struct pblk_block *rb)
+					     struct pblk_block *rb)
 {
 	if (ra->nr_invalid_secs == rb->nr_invalid_secs)
 		return ra;
