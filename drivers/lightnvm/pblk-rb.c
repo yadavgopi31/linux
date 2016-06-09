@@ -36,8 +36,8 @@
  * (Documentation/circular-buffers.txt)
  */
 int pblk_rb_init(struct pblk_rb *rb, struct pblk_rb_entry *rb_entry_base,
-			void *rb_data_base, unsigned long grace_area_sz,
-			unsigned int power_size, unsigned int power_seg_sz)
+		 void *rb_data_base, unsigned long grace_area_sz,
+		 unsigned int power_size, unsigned int power_seg_sz)
 {
 	struct pblk_rb_entry *entry;
 	unsigned int i;
@@ -95,7 +95,7 @@ void *pblk_rb_entries_ref(struct pblk_rb *rb)
 
 /* Copy data to ring buffer. It handles wrap around */
 static void memcpy_torb(struct pblk_rb *rb, void *buf, void *data,
-								unsigned size)
+			unsigned size)
 {
 	unsigned s1, s2;
 
@@ -115,7 +115,7 @@ static void memcpy_torb(struct pblk_rb *rb, void *buf, void *data,
 
 /* Copy data from ring buffer. It handles wrap around */
 static void memcpy_fromrb(struct pblk_rb *rb, void *buf, void *data,
-								unsigned size)
+			  unsigned size)
 {
 	unsigned s1, s2;
 
@@ -171,8 +171,7 @@ unsigned long pblk_rb_count(struct pblk_rb *rb)
 	return pblk_rb_ring_count(mem, subm, rb->nr_entries);
 }
 
-/**
- * Returns how many entries are on the write buffer at the time of call and
+/* Returns how many entries are on the write buffer at the time of call and
  * takes the submission lock. The lock is only taken if there are any entries on
  * the buffer. This guarantees that at least the returned amount of entries
  * will be on the buffer when reading from it.
@@ -201,7 +200,8 @@ void pblk_rb_read_commit(struct pblk_rb *rb, unsigned int nr_entries)
 	lockdep_assert_held(&rb->r_lock);
 
 	subm = READ_ONCE(rb->subm);
-	smp_store_release(&rb->subm, (subm + nr_entries) & (rb->nr_entries - 1));
+	smp_store_release(&rb->subm,
+				(subm + nr_entries) & (rb->nr_entries - 1));
 	spin_unlock(&rb->r_lock);
 }
 
@@ -228,7 +228,7 @@ void pblk_rb_read_rollback(struct pblk_rb *rb)
 }
 
 static void pblk_rb_requeue_entry(struct pblk_rb *rb,
-						struct pblk_rb_entry *entry)
+				  struct pblk_rb_entry *entry)
 {
 	struct pblk *pblk = container_of(rb, struct pblk, rwb);
 	struct ppa_addr ppa;
@@ -268,7 +268,7 @@ static void pblk_rb_update_map(struct pblk *pblk, struct pblk_w_ctx *w_ctx)
 }
 
 static int __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned long *l2p_upd,
-				 unsigned int to_update, unsigned long limit)
+				unsigned int to_update, unsigned long limit)
 {
 	struct pblk *pblk = container_of(rb, struct pblk, rwb);
 	struct pblk_rb_entry *entry;
@@ -300,11 +300,7 @@ static int __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned long *l2p_upd,
 		 * buffer and make it take the normal path to get a new ppa
 		 * mapping. Since the requeue takes a place on the buffer,
 		 * unpdate an extra entry.
-		 *
-		 * TODO: Make a recovery path that prioritizes these entries in
-		 * order to "better comply" with the expectations of user space
-		 * applications (e.g., returned FLUSH | FUA).
-		 **/
+		 */
 		if (unlikely(block_is_bad(rblk))) {
 			pblk_rb_requeue_entry(rb, entry);
 			to_update++;
@@ -323,7 +319,7 @@ out:
 	return ret;
 }
 
-/* When we move the  l2p_update pointer, we update the l2p table - lookups will
+/* When we move the l2p_update pointer, we update the l2p table - lookups will
  * point to the physical address instead of to the cacheline in the write buffer
  * from this moment on.
  */
@@ -357,8 +353,7 @@ out:
 	return ret;
 }
 
-/**
- * Update the l2p entry for all sectors stored on the write buffer. This means
+/* Update the l2p entry for all sectors stored on the write buffer. This means
  * that all future lookups to the l2p table will point to a device address, not
  * to the cacheline in the write buffer.
  */
@@ -394,7 +389,7 @@ void pblk_rb_sync_l2p(struct pblk_rb *rb)
  *
  */
 void pblk_rb_write_entry(struct pblk_rb *rb, void *data, struct pblk_w_ctx w_ctx,
-							unsigned int pos)
+			 unsigned int pos)
 {
 	struct pblk_rb_entry *entry;
 	unsigned long size = rb->seg_size;
@@ -454,9 +449,9 @@ void pblk_rb_write_rollback(struct pblk_rb *rb)
  * overwrite the entries passed on the list.
  */
 unsigned int pblk_rb_read_to_bio_list(struct pblk_rb *rb, struct bio *bio,
-					struct pblk_ctx *ctx,
-					struct list_head *list,
-					unsigned int max)
+				      struct pblk_ctx *ctx,
+				      struct list_head *list,
+				      unsigned int max)
 {
 	struct pblk *pblk = container_of(rb, struct pblk, rwb);
 	struct request_queue *q = pblk->dev->q;
@@ -506,16 +501,15 @@ out:
  * persist data on the write buffer to the media.
  */
 unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct bio *bio,
-					struct pblk_ctx *ctx,
-					unsigned int nr_entries,
-					unsigned long *sync_point)
+				 struct pblk_ctx *ctx,
+				 unsigned int nr_entries,
+				 unsigned long *sync_point)
 {
 	struct pblk *pblk = container_of(rb, struct pblk, rwb);
 	struct request_queue *q = pblk->dev->q;
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 	struct pblk_rb_entry *entry;
 	struct page *page;
-	/* unsigned long size = nr_entries * rb->seg_size; */
 	unsigned long mem, subm;
 	unsigned long count;
 	unsigned int pad = 0, read = 0, to_read = nr_entries;
@@ -533,9 +527,6 @@ unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct bio *bio,
 		to_read = count;
 	}
 
-	/* entry = &rb->entries[subm]; */
-	/* memcpy_fromrb(rb, buf, entry->data, size); */
-
 	c_ctx->sentry = subm;
 	c_ctx->nr_valid = to_read;
 	c_ctx->nr_padded = pad;
@@ -545,7 +536,7 @@ unsigned int pblk_rb_read_to_bio(struct pblk_rb *rb, struct bio *bio,
 		entry = &rb->entries[subm];
 
 		/* A write has been allowed into the buffer, but data is still
-		 * being copied to it
+		 * being copied to it. It is ok to busy wait.
 		 */
 try:
 		flags = READ_ONCE(entry->w_ctx.flags);
@@ -601,8 +592,7 @@ out:
  *
  * This function is used to copy data on the write buffer to a read bio.
  */
-void pblk_rb_copy_to_bio(struct pblk_rb *rb, struct bio *bio,
-								u64 pos)
+void pblk_rb_copy_to_bio(struct pblk_rb *rb, struct bio *bio, u64 pos)
 {
 	struct pblk_rb_entry *entry;
 	struct bio_vec bv;
@@ -737,8 +727,7 @@ unsigned long pblk_rb_sync_point_count(struct pblk_rb *rb)
 	return count;
 }
 
-/*
- * Scan from the current position of the sync pointer to find the entry that
+/* Scan from the current position of the sync pointer to find the entry that
  * corresponds to the given ppa. The assumption is that the ppa is close to the
  * sync pointer thus the search will not take long.
  *
@@ -747,7 +736,7 @@ unsigned long pblk_rb_sync_point_count(struct pblk_rb *rb)
  * assumption in mind, there is no need to take the sync lock.
  */
 struct pblk_rb_entry *pblk_rb_sync_scan_entry(struct pblk_rb *rb,
-						struct ppa_addr *ppa)
+					      struct ppa_addr *ppa)
 {
 	struct pblk *pblk = container_of(rb, struct pblk, rwb);
 	struct nvm_dev *dev = pblk->dev;
