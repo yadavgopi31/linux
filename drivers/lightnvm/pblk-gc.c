@@ -1,0 +1,484 @@
+/*
+ * Copyright (C) 2016 CNEX Labs
+ * Initial release: Javier Gonzalez <jg@lightnvm.io>
+ *                  Matias Bjorling <m@bjorling.me>
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License version
+ * 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * GC for pblk: physical block-device target
+ */
+
+#include "pblk.h"
+
+static void pblk_free_gc_rqd(struct pblk *pblk, struct nvm_rq *rqd)
+{
+	uint8_t nr_secs = rqd->nr_ppas;
+
+	if (nr_secs > 1)
+		nvm_dev_dma_free(pblk->dev, rqd->ppa_list, rqd->dma_ppa_list);
+
+	if (rqd->meta_list)
+		nvm_dev_dma_free(pblk->dev, rqd->meta_list, rqd->dma_meta_list);
+
+	pblk_free_rqd(pblk, rqd, READ);
+}
+
+static void pblk_gc_setup_rq(struct pblk *pblk, struct pblk_block *rblk,
+			     u64 *lba_list, unsigned int secs_to_gc, int off,
+			     unsigned int *ignored)
+{
+	struct pblk_addr *gp;
+	u64 lba;
+	int i;
+
+	/* Discard invalid addresses for current GC I/O */
+	for (i = 0; i < secs_to_gc; i++) {
+		lba = lba_list[i + off];
+
+		/* Omit padded entries on GC */
+		if (lba == ADDR_EMPTY) {
+			(*ignored)++;
+			continue;
+		}
+
+		/* If lba is mapped to a different block it is not necessary to
+		 * move it to a different block.
+		 *
+		 * The same applies for an entry in cache; the backpointer takes
+		 * care of requeuing entries mapped to a bad block. This is to
+		 * avoid double GC when doing recovery.
+		 */
+		spin_lock(&pblk->trans_lock);
+		gp = &pblk->trans_map[lba];
+		spin_unlock(&pblk->trans_lock);
+
+		if (nvm_addr_in_cache(gp->ppa) ||
+		   (gp->rblk->parent->id != rblk->parent->id)) {
+			lba_list[i + off] = ADDR_EMPTY;
+			(*ignored)++;
+			continue;
+		}
+	}
+}
+
+static int pblk_gc_read_victim_blk(struct pblk *pblk, u64 *lba_list,
+				   void *data, unsigned int data_len,
+				   unsigned int secs_to_gc,
+				   unsigned int secs_in_disk, int off)
+{
+	struct nvm_dev *dev = pblk->dev;
+	struct request_queue *q = dev->q;
+	struct bio *bio;
+	struct nvm_rq *rqd;
+	int ret;
+	DECLARE_COMPLETION_ONSTACK(wait);
+
+	bio = bio_map_kern(q, data, data_len, GFP_KERNEL);
+	if (!bio) {
+		pr_err("pblk: could not allocate GC bio\n");
+		goto fail;
+	}
+
+	bio->bi_iter.bi_sector = 0; /* artificial bio */
+	bio->bi_rw = READ;
+	bio->bi_private = &wait;
+	bio->bi_end_io = pblk_end_sync_bio;
+
+	rqd = pblk_alloc_rqd(pblk, READ);
+	if (IS_ERR(rqd)) {
+		pr_err("pblk: could not allocate GC request\n");
+		goto fail_free_bio;
+	}
+
+	ret = pblk_submit_read_list(pblk, bio, rqd, &lba_list[off],
+					secs_to_gc, secs_in_disk,
+					PBLK_IOTYPE_SYNC);
+	if (ret) {
+		pr_err("pblk: GC read request failed: (%d)\n", ret);
+		goto fail_free_rqd;
+	}
+
+	wait_for_completion_io(&wait);
+	pblk_free_gc_rqd(pblk, rqd);
+
+	if (bio->bi_error) {
+		pr_err("pblk: GC sync read failed (%u)\n",
+							bio->bi_error);
+		pblk_print_failed_bio(rqd, rqd->nr_ppas);
+	}
+
+#ifdef CONFIG_NVM_DEBUG
+	atomic_add(secs_to_gc, &pblk->sync_reads);
+	atomic_sub(secs_to_gc, &pblk->inflight_reads);
+#endif
+
+	bio_put(bio);
+
+	return NVM_IO_OK;
+
+fail_free_rqd:
+	pblk_free_gc_rqd(pblk, rqd);
+fail_free_bio:
+	bio_put(bio);
+fail:
+	return NVM_IO_ERR;
+}
+
+static int pblk_gc_write_to_buffer(struct pblk *pblk, u64 *lba_list,
+				   void *data, struct pblk_kref_buf *ref_buf,
+				   unsigned int data_len,
+				   unsigned int secs_to_gc,
+				   unsigned int secs_in_disk, int off)
+{
+	struct nvm_dev *dev = pblk->dev;
+	struct request_queue *q = dev->q;
+	struct bio *bio;
+
+	bio = bio_map_kern(q, data, data_len, GFP_KERNEL);
+	if (!bio) {
+		pr_err("pblk: could not allocate GC bio\n");
+		return NVM_IO_ERR;
+	}
+
+	bio->bi_iter.bi_sector = 0; /* artificial bio */
+	bio->bi_rw = WRITE;
+
+write_retry:
+	if (pblk_write_list_to_cache(pblk, bio, &lba_list[off], ref_buf,
+						secs_to_gc, secs_in_disk,
+						PBLK_IOTYPE_REF)) {
+		schedule();
+		goto write_retry;
+	}
+
+	bio_put(bio);
+
+	return NVM_IO_OK;
+}
+
+/*
+ * pblk_move_valid_secs -- move valid data off the block before gc
+ * @pblk: the 'pblk' structure
+ * @block: the block from which to migrate live sectors
+ *
+ * Description:
+ *   GC algorithms may call this function to migrate remaining live
+ *   pages off the block prior to erasing it. This function blocks
+ *   further execution until the operation is complete.
+ */
+int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
+			    u64 *lba_list, unsigned int nr_entries)
+{
+	struct nvm_dev *dev = pblk->dev;
+	struct pblk_kref_buf *ref_buf;
+	void *data;
+	unsigned int data_len;
+	unsigned int alloc_entries, secs_to_gc, secs_in_disk;
+	unsigned int read_left, ignored;
+	int max = pblk->max_write_pgs;
+	int off;
+	int moved = 0;
+
+	alloc_entries = (nr_entries > max) ? max : nr_entries;
+	data = kmalloc(alloc_entries * dev->sec_size, GFP_KERNEL);
+	if (!data) {
+		pr_err("pblk: could not allocate GC buffer\n");
+		goto out;
+	}
+
+	ref_buf = kmalloc(sizeof(struct pblk_kref_buf), GFP_KERNEL);
+	if (!ref_buf)
+		goto fail_free_data;
+
+	kref_init(&ref_buf->ref);
+	ref_buf->data = data;
+
+	off = 0;
+	read_left = nr_entries;
+	do {
+		secs_to_gc = (read_left > max) ? max : read_left;
+		ignored = 0;
+
+		pblk_gc_setup_rq(pblk, rblk, lba_list, secs_to_gc, off,
+								&ignored);
+
+		if (ignored == secs_to_gc)
+			goto next;
+
+		secs_in_disk = secs_to_gc - ignored;
+		data_len = secs_in_disk * dev->sec_size;
+
+		/* Read from GC victim block */
+		if (pblk_gc_read_victim_blk(pblk, lba_list, data, data_len,
+						secs_to_gc, secs_in_disk, off))
+			goto fail_free_krefbuf;
+
+		/* Write to buffer */
+		if (pblk_gc_write_to_buffer(pblk, lba_list, data, ref_buf,
+						data_len, secs_to_gc,
+						secs_in_disk, off))
+			goto fail_free_krefbuf;
+
+next:
+		read_left -= secs_to_gc;
+		off += secs_to_gc;
+		moved += secs_to_gc;
+	} while (read_left > 0);
+
+	kref_put(&ref_buf->ref, pblk_free_ref_mem);
+
+	return moved;
+
+fail_free_krefbuf:
+	kfree(ref_buf);
+fail_free_data:
+	kfree(data);
+out:
+	return moved;
+}
+
+void pblk_gc_queue(struct work_struct *work)
+{
+	struct pblk_block_ws *blk_ws = container_of(work, struct pblk_block_ws,
+									ws_blk);
+	struct pblk *pblk = blk_ws->pblk;
+	struct pblk_block *rblk = blk_ws->rblk;
+	struct pblk_lun *rlun = rblk->rlun;
+
+	spin_lock(&rlun->lock_lists);
+	list_move_tail(&rblk->list, &rlun->closed_list);
+	spin_unlock(&rlun->lock_lists);
+
+	spin_lock(&rlun->lock);
+	list_add_tail(&rblk->prio, &rlun->prio_list);
+	spin_unlock(&rlun->lock);
+
+	mempool_free(blk_ws, pblk->blk_ws_pool);
+	pr_debug("nvm: block '%lu' is full, allow GC (sched)\n",
+							rblk->parent->id);
+}
+
+/* the block with highest number of invalid pages, will be in the beginning
+ * of the list
+ */
+static struct pblk_block *rblock_max_invalid(struct pblk_block *ra,
+					     struct pblk_block *rb)
+{
+	if (ra->nr_invalid_secs == rb->nr_invalid_secs)
+		return ra;
+
+	return (ra->nr_invalid_secs < rb->nr_invalid_secs) ? rb : ra;
+}
+
+/* linearly find the block with highest number of invalid pages
+ * requires lun->lock
+ */
+static struct pblk_block *block_prio_find_max(struct pblk_lun *rlun)
+{
+	struct list_head *prio_list = &rlun->prio_list;
+	struct pblk_block *rblk, *max;
+
+	BUG_ON(list_empty(prio_list));
+
+	max = list_first_entry(prio_list, struct pblk_block, prio);
+	list_for_each_entry(rblk, prio_list, prio)
+		max = rblock_max_invalid(max, rblk);
+
+	return max;
+}
+
+static void pblk_block_gc(struct work_struct *work)
+{
+	struct pblk_block_ws *blk_ws = container_of(work, struct pblk_block_ws,
+									ws_blk);
+	struct pblk *pblk = blk_ws->pblk;
+	struct nvm_dev *dev = pblk->dev;
+	struct pblk_block *rblk = blk_ws->rblk;
+	struct pblk_lun *rlun = rblk->rlun;
+	void *recov_page;
+	u64 *lba_list;
+	u64 gc_lba_list[PBLK_MAX_REQ_ADDRS];
+	unsigned int page_size = dev->sec_per_pl * dev->sec_size;
+	int bit;
+	int nr_ppas;
+	int moved, total_moved = 0;
+
+	mempool_free(blk_ws, pblk->blk_ws_pool);
+	pr_debug("pblk: block '%lu' being reclaimed\n", rblk->parent->id);
+
+	recov_page = kzalloc(page_size, GFP_KERNEL);
+	if (!recov_page)
+		goto put_back;
+
+	if (pblk_recov_read(pblk, rblk, recov_page, page_size)) {
+		pr_err("pblk: could not recover last page. Blk:%lu\n",
+						rblk->parent->id);
+		goto free_recov_page;
+	}
+
+	lba_list = pblk_recov_get_lba_list(pblk, recov_page);
+	if (!lba_list) {
+		pr_err("pblk: Could not interpret recover page. Blk:%lu\n",
+							rblk->parent->id);
+		goto free_recov_page;
+	}
+
+	bit = 0;
+next_lba_list:
+	nr_ppas = 0;
+	do {
+		bit = find_next_bit(rblk->invalid_bitmap,
+						pblk->nr_blk_dsecs, bit);
+		gc_lba_list[nr_ppas] = lba_list[bit];
+
+		nr_ppas++;
+		bit++;
+		if (bit > pblk->nr_blk_dsecs)
+			goto prepare_ppas;
+	} while (nr_ppas < PBLK_MAX_REQ_ADDRS);
+
+prepare_ppas:
+	moved = pblk_gc_move_valid_secs(pblk, rblk, gc_lba_list, nr_ppas);
+	if (moved != nr_ppas) {
+		pr_err("pblk: could not GC all sectors:blk:%lu, GC:%d/%d/%d\n",
+						rblk->parent->id,
+						moved, nr_ppas,
+						rblk->nr_invalid_secs);
+		goto put_back;
+	}
+
+	total_moved += moved;
+	if (total_moved < rblk->nr_invalid_secs)
+		goto next_lba_list;
+
+	spin_lock(&rblk->lock);
+	pblk_put_blk(pblk, rblk);
+	spin_unlock(&rblk->lock);
+
+	kfree(recov_page);
+	return;
+
+free_recov_page:
+	kfree(recov_page);
+put_back:
+	spin_lock(&rlun->lock);
+	list_add_tail(&rblk->prio, &rlun->prio_list);
+	spin_unlock(&rlun->lock);
+}
+
+static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
+{
+	struct nvm_lun *lun = rlun->parent;
+	int emergency_gc;
+	struct pblk_block_ws *blk_ws;
+	unsigned int nr_blocks_need;
+
+	nr_blocks_need = pblk->dev->blks_per_lun / GC_LIMIT_INVERSE;
+
+	if (nr_blocks_need < pblk->nr_luns)
+		nr_blocks_need = pblk->nr_luns;
+
+	spin_lock(&rlun->lock);
+	emergency_gc = pblk_is_emergency_gc(pblk, lun->id);
+
+	while (nr_blocks_need > lun->nr_free_blocks &&
+					!list_empty(&rlun->prio_list)) {
+		struct pblk_block *rblk = block_prio_find_max(rlun);
+		struct nvm_block *block = rblk->parent;
+
+		if (!rblk->nr_invalid_secs)
+			break;
+
+		blk_ws = mempool_alloc(pblk->blk_ws_pool, GFP_ATOMIC);
+		if (!blk_ws)
+			break;
+
+		list_del_init(&rblk->prio);
+
+		BUG_ON(!block_is_full(pblk, rblk));
+
+		pr_debug("pblk: selected block '%lu' for GC\n", block->id);
+
+		blk_ws->pblk = pblk;
+		blk_ws->rblk = rblk;
+
+		INIT_WORK(&blk_ws->ws_blk, pblk_block_gc);
+		queue_work(pblk->kgc_wq, &blk_ws->ws_blk);
+
+		nr_blocks_need--;
+	}
+
+	if (unlikely(emergency_gc) &&
+				lun->nr_free_blocks > pblk->gc_ths.emergency) {
+		pr_debug("pblk: exit emergency GC. Lun:%d\n", lun->id);
+		pblk_emergency_gc_off(pblk, lun->id);
+	}
+	spin_unlock(&rlun->lock);
+
+	if (unlikely(!list_empty(&rlun->bb_list)))
+		pblk_recov_clean_bb_list(pblk, rlun);
+
+	/* TODO: Hint that request queue can be started again */
+}
+
+void pblk_gc(struct work_struct *work)
+{
+	struct pblk *pblk = container_of(work, struct pblk, ws_gc);
+	struct pblk_lun *rlun;
+	int i;
+
+	pblk_for_each_lun(pblk, rlun, i)
+		pblk_lun_gc(pblk, rlun);
+}
+
+static void pblk_gc_kick(struct pblk *pblk)
+{
+	queue_work(pblk->krqd_wq, &pblk->ws_gc);
+}
+
+/*
+ * timed GC every interval.
+ */
+static void pblk_gc_timer(unsigned long data)
+{
+	struct pblk *pblk = (struct pblk *)data;
+
+	pblk_gc_kick(pblk);
+	mod_timer(&pblk->gc_timer, jiffies + msecs_to_jiffies(GC_TIME_MSECS));
+}
+
+int pblk_gc_init(struct pblk *pblk)
+{
+	pblk->krqd_wq = alloc_workqueue("pblk-lun", WQ_MEM_RECLAIM | WQ_UNBOUND,
+								pblk->nr_luns);
+	if (!pblk->krqd_wq)
+		return -ENOMEM;
+
+	pblk->kgc_wq = alloc_workqueue("pblk-bg", WQ_MEM_RECLAIM, 1);
+	if (!pblk->kgc_wq)
+		return -ENOMEM;
+
+	setup_timer(&pblk->gc_timer, pblk_gc_timer, (unsigned long)pblk);
+
+	return 0;
+}
+
+void pblk_gc_exit(struct pblk *pblk)
+{
+	del_timer(&pblk->gc_timer);
+	flush_workqueue(pblk->kgc_wq);
+
+	if (pblk->krqd_wq)
+		destroy_workqueue(pblk->krqd_wq);
+
+	if (pblk->kgc_wq)
+		destroy_workqueue(pblk->kgc_wq);
+}
+
