@@ -57,10 +57,11 @@ static void pblk_rec_valid_pgs(struct work_struct *work)
 retry:
 	ret = pblk_gc_move_valid_secs(pblk, rblk, &lba_list[off], nr_entries);
 	if (ret != nr_entries) {
-		pr_err("pblk: could not recover all sectors:blk:%lu, recovered:%d/%d. Try:%d/%d\n",
-						rblk->parent->id,
-						ret, nr_entries,
-						try, PBLK_GC_TRIES);
+		pr_err("pblk: could not recover all sectors:blk:%lu, "
+					"recovered:%d/%d. Try:%d/%d\n",
+					rblk->parent->id,
+					ret, nr_entries,
+					try, PBLK_GC_TRIES);
 		if (try < PBLK_GC_TRIES) {
 			off += ret;
 			goto retry;
@@ -80,7 +81,7 @@ out:
 }
 
 static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
-			struct pblk_ctx *ctx, unsigned int nr_rec_secs)
+			     struct pblk_ctx *ctx, unsigned int nr_rec_secs)
 {
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 	unsigned int valid_secs = c_ctx->nr_valid;
@@ -105,7 +106,6 @@ static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		goto out;
 	}
 
-	/* TODO: Use mask to check that a whole page fails (not indiv. secs) */
 	for (i = 0; i < nr_rec_secs; i += min) {
 		if (i + min > nr_rec_secs) {
 			setup_secs = nr_rec_secs % min;
@@ -129,8 +129,7 @@ static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
 
 #ifdef CONFIG_NVM_DEBUG
 	if (nvm_boundary_checks(pblk->dev, rqd->ppa_list, rqd->nr_ppas))
-		BUG_ON(1);
-		/* WARN_ON(1); */
+		WARN_ON(1);
 #endif
 
 out:
@@ -223,8 +222,8 @@ void pblk_run_recovery(struct pblk *pblk, struct pblk_block *rblk)
 }
 
 int pblk_recov_setup_end_rq(struct pblk *pblk, struct pblk_ctx *ctx,
-			  struct pblk_rec_ctx *recovery, u64 *comp_bits,
-			  unsigned int c_entries)
+			    struct pblk_rec_ctx *recovery, u64 *comp_bits,
+			    unsigned int c_entries)
 {
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 	struct nvm_rq *rec_rqd;
@@ -253,18 +252,14 @@ int pblk_recov_setup_end_rq(struct pblk *pblk, struct pblk_ctx *ctx,
 	rec_c_ctx->sentry = pblk_rb_wrap_pos(&pblk->rwb,
 						c_ctx->sentry + c_entries);
 	if (c_entries >= c_ctx->nr_valid) {
-		/* Recovery context */
 		rec_c_ctx->nr_valid = 0;
 		rec_c_ctx->nr_padded = nr_entries - c_entries;
 
-		/* Updated completion context */
 		c_ctx->nr_padded = c_entries - c_ctx->nr_valid;
 	} else {
-		/* Recovery context */
 		rec_c_ctx->nr_valid = c_ctx->nr_valid - c_entries;
 		rec_c_ctx->nr_padded = c_ctx->nr_padded;
 
-		/* Updated completion context */
 		c_ctx->nr_valid = c_entries;
 		c_ctx->nr_padded = 0;
 	}
@@ -430,9 +425,8 @@ int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk)
 		goto free_recov_page;
 
 	/* TODO: We need gennvm to give us back the blocks that we owe so that
-	 * we can bring up the data structures before we populate them
-	 *  - all bitmaps
-	 *  - GC
+	 * we can bring up the data structures before we populate them. For now
+	 * we scan all blocks on drive.
 	 */
 	if (pblk_init_blk(pblk, rblk, PBLK_BLK_ST_CLOSED))
 		goto free_recov_page;
@@ -454,7 +448,7 @@ int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk)
 					!nvm_boundary_checks(dev, &ppa, 1)) {
 			pblk_update_map(pblk, lba_list[i], rblk, ppa);
 		}
-		/*else - mark as invalid */
+		/*TODO: else - mark as invalid */
 	}
 
 free_recov_page:
@@ -586,5 +580,4 @@ void pblk_close_rblk_queue(struct work_struct *work)
 
 	mempool_free(blk_ws, pblk->blk_ws_pool);
 }
-
 
