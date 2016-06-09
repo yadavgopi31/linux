@@ -434,7 +434,7 @@ int pblk_setup_w_single(struct pblk *pblk, struct nvm_rq *rqd,
 int pblk_alloc_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		    struct pblk_ctx *ctx, unsigned int nr_secs);
 void pblk_read_from_cache(struct pblk *pblk, struct bio *bio,
-			 struct ppa_addr ppa);
+			  struct ppa_addr ppa);
 int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk, u32 status);
 void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk);
 void pblk_put_blk_unlocked(struct pblk *pblk, struct pblk_block *rblk);
@@ -444,15 +444,15 @@ void pblk_free_blks(struct pblk *pblk);
 void pblk_submit_write(struct work_struct *work);
 void pblk_pad_open_blks(struct pblk *pblk);
 struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
-							unsigned long flags);
+				unsigned long flags);
 void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk,
-								int is_bb);
+		      int is_bb);
 
 /* pblk recovery */
 void pblk_run_recovery(struct pblk *pblk, struct pblk_block *rblk);
 int pblk_recov_setup_end_rq(struct pblk *pblk, struct pblk_ctx *ctx,
-			  struct pblk_rec_ctx *recovery, u64 *comp_bits,
-			  unsigned int c_entries);
+			    struct pblk_rec_ctx *recovery, u64 *comp_bits,
+			    unsigned int c_entries);
 int pblk_recov_read(struct pblk *pblk, struct pblk_block *rblk,
 		    void *recov_page, unsigned int page_size);
 u64 *pblk_recov_get_lba_list(struct pblk *pblk, void *recov_page);
@@ -468,15 +468,15 @@ void pblk_gc_exit(struct pblk *pblk);
 void pblk_gc_queue(struct work_struct *work);
 void pblk_lun_gc(struct work_struct *work);
 int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
-			     u64 *lba_list, unsigned int nr_entries);
+			    u64 *lba_list, unsigned int nr_entries);
 
+//TODO: UNIFY THIS
 static inline int pblk_gc_invalidate_sec(struct pblk_block *rblk,
 					 struct ppa_addr a)
 {
 	rblk->nr_invalid_secs++;
 	return test_and_set_bit(a.ppa, rblk->invalid_bitmap);
 }
-
 
 #ifdef CONFIG_NVM_DEBUG
 void pblk_rb_print_debug(struct pblk_rb *rb);
@@ -564,7 +564,7 @@ static inline struct pblk_ctx *pblk_set_ctx(struct pblk *pblk,
 }
 
 static inline void pblk_memcpy_addr(struct pblk_addr *to,
-							struct pblk_addr *from)
+				    struct pblk_addr *from)
 {
 	to->ppa = from->ppa;
 	to->rblk = from->rblk;
@@ -590,11 +590,8 @@ static inline void pblk_free_ref_mem(struct kref *ref)
 
 /* Calculate the page offset of within a block from a generic address */
 static inline u64 pblk_gaddr_to_pg_offset(struct nvm_dev *dev,
-							struct ppa_addr p)
+					  struct ppa_addr p)
 {
-	/* FIXME: The calculation is correct, but the variable naming is
-	 * misleading. Change this.
-	 */
 	return (u64) (p.g.pg * dev->sec_per_pl) +
 				(p.g.pl * dev->sec_per_pg) + p.g.sec;
 }
@@ -634,7 +631,7 @@ static inline struct ppa_addr pblk_dev_addr_to_ppa(u64 addr)
 }
 
 static struct ppa_addr linear_to_generic_addr(struct nvm_dev *dev,
-							struct ppa_addr r)
+					      struct ppa_addr r)
 {
 	struct ppa_addr l;
 	int secs, pgs, pls, blks, luns;
