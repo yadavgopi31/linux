@@ -62,13 +62,13 @@ err:
 }
 
 void pblk_read_from_cache(struct pblk *pblk, struct bio *bio,
-			 struct ppa_addr ppa)
+			  struct ppa_addr ppa)
 {
 	pblk_rb_copy_to_bio(&pblk->rwb, bio, nvm_addr_to_cacheline(ppa));
 }
 
 static int pblk_try_read_from_cache(struct pblk *pblk, struct bio *bio,
-							struct pblk_addr *addr)
+				    struct pblk_addr *addr)
 {
 	/* The write thread commits the changes to the buffer once the l2p table
 	 * has been updated. In this way, if the address read from the l2p table
@@ -120,8 +120,8 @@ done:
 }
 
 static int pblk_read_ppalist_rq(struct pblk *pblk, struct bio *bio,
-			struct nvm_rq *rqd, unsigned long flags, int nr_secs,
-			unsigned long *read_bitmap)
+				struct nvm_rq *rqd, unsigned long flags,
+				int nr_secs, unsigned long *read_bitmap)
 {
 	sector_t laddr = pblk_get_laddr(bio);
 	int advanced_bio = 0;
@@ -178,11 +178,14 @@ static int pblk_read_ppalist_rq(struct pblk *pblk, struct bio *bio,
 	return NVM_IO_OK;
 }
 
-int pblk_submit_read_io(struct pblk *pblk, struct bio *bio,
-			struct nvm_rq *rqd, unsigned long flags)
+int pblk_submit_read_io(struct pblk *pblk, struct bio *bio, struct nvm_rq *rqd,
+			unsigned long flags)
 {
 	int err;
 
+/* TODO: Stripe reads based on mapping algorithm. This requires having a mapping
+ * policy. This is necessary to optimize for specific workloads
+ */
 /*
 	switch(dev->plane_mode) {
 	case NVM_PLANE_QUAD:
@@ -221,7 +224,7 @@ int pblk_submit_read_io(struct pblk *pblk, struct bio *bio,
 }
 
 static int __pblk_submit_read(struct pblk *pblk, struct bio *bio,
-				struct nvm_rq *rqd, unsigned long flags)
+			      struct nvm_rq *rqd, unsigned long flags)
 {
 	struct pblk_r_ctx *r_ctx = nvm_rq_to_pdu(rqd);
 	unsigned long read_bitmap; /* Max 64 ppas per request */
@@ -279,8 +282,7 @@ static int __pblk_submit_read(struct pblk *pblk, struct bio *bio,
 
 		ppa_list = (rqd->nr_ppas > 1) ? rqd->ppa_list : &rqd->ppa_addr;
 		if (nvm_boundary_checks(pblk->dev, ppa_list, rqd->nr_ppas))
-			BUG_ON(1);
-			/* WARN_ON(1); */
+			WARN_ON(1);
 #endif
 
 		/* Clone read bio to deal with read errors internally */
@@ -404,14 +406,8 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 
 #ifdef CONFIG_NVM_DEBUG
 	ppa_list = (rqd->nr_ppas > 1) ? rqd->ppa_list : &rqd->ppa_addr;
-	if (nvm_boundary_checks(pblk->dev, ppa_list, rqd->nr_ppas)) {
-		printk(KERN_CRIT "nppas:%d, nr_secs:%d, nr_holes:%d\n",
-				rqd->nr_ppas,
-				nr_secs,
-				nr_holes);
-		BUG_ON(1);
-	}
-		/* WARN_ON(1); */
+	if (nvm_boundary_checks(pblk->dev, ppa_list, rqd->nr_ppas))
+		WARN_ON(1);
 #endif
 
 	ret = pblk_submit_read_io(pblk, new_bio, rqd, r_ctx->flags);
@@ -480,8 +476,8 @@ err:
  * return: 1 if bio has been written to buffer, 0 otherwise.
  */
 static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
-				 unsigned long flags, unsigned int nr_entries,
-				 int *ret_val)
+			       unsigned long flags, unsigned int nr_entries,
+			       int *ret_val)
 {
 	sector_t laddr = pblk_get_laddr(bio);
 	struct pblk_w_ctx w_ctx;
@@ -608,7 +604,7 @@ void pblk_flush_writer(struct pblk *pblk)
 }
 
 static void pblk_invalidate_range(struct pblk *pblk, sector_t slba,
-							unsigned int nr_secs)
+				  unsigned int nr_secs)
 {
 	sector_t i;
 
@@ -688,7 +684,7 @@ int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk, u32 status)
 	struct pblk_blk_rec_lpg *rlpg;
 	unsigned int rlpg_len, req_len, bitmap_len;
 	int nr_entries = pblk->nr_blk_dsecs;
-	int nr_bitmaps = 3; /* sectors, sync, invalid */
+	int nr_bitmaps = 3; /* sector_bitmap, sync_bitmap, invalid_bitmap */
 
 	bitmap_len = BITS_TO_LONGS(nr_entries);
 	rlpg_len = sizeof(struct pblk_blk_rec_lpg) +
@@ -724,7 +720,7 @@ int pblk_init_blk(struct pblk *pblk, struct pblk_block *rblk, u32 status)
 }
 
 struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
-							unsigned long flags)
+				unsigned long flags)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct nvm_lun *lun = rlun->parent;
@@ -771,8 +767,7 @@ fail_get_blk:
 	return NULL;
 }
 
-void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk,
-								int is_bb)
+void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk, int is_bb)
 {
 	struct pblk *pblk = rlun->pblk;
 	struct nvm_lun *lun = rlun->parent;
@@ -789,7 +784,7 @@ void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk,
 }
 
 static int pblk_replace_blk(struct pblk *pblk, struct pblk_block *rblk,
-					struct pblk_lun *rlun, int is_bb)
+			    struct pblk_lun *rlun, int is_bb)
 {
 	struct nvm_lun *lun = rlun->parent;
 	int ret = 0;
@@ -809,7 +804,7 @@ out:
 }
 
 static void pblk_run_blk_ws(struct pblk *pblk, struct pblk_block *rblk,
-					void(*work)(struct work_struct *))
+			    void(*work)(struct work_struct *))
 {
 	struct pblk_block_ws *blk_ws;
 
@@ -842,7 +837,7 @@ static void pblk_end_close_blk_bio(struct pblk *pblk, struct nvm_rq *rqd,
 }
 
 static void pblk_end_w_pad(struct pblk *pblk, struct nvm_rq *rqd,
-							struct pblk_ctx *ctx)
+			   struct pblk_ctx *ctx)
 {
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 
@@ -874,7 +869,7 @@ static void pblk_sync_buffer(struct pblk *pblk, struct pblk_addr p, int flags)
 }
 
 static unsigned long pblk_end_w_bio(struct pblk *pblk, struct nvm_rq *rqd,
-							struct pblk_ctx *ctx)
+				    struct pblk_ctx *ctx)
 {
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 	struct pblk_w_ctx *w_ctx;
@@ -912,14 +907,15 @@ static unsigned long pblk_end_w_bio(struct pblk *pblk, struct nvm_rq *rqd,
 }
 
 static unsigned long pblk_end_queued_w_bio(struct pblk *pblk,
-			struct nvm_rq *rqd, struct pblk_ctx *ctx)
+					   struct nvm_rq *rqd,
+					   struct pblk_ctx *ctx)
 {
 	list_del(&ctx->list);
 	return pblk_end_w_bio(pblk, rqd, ctx);
 }
 
 static void pblk_compl_queue(struct pblk *pblk, struct nvm_rq *rqd,
-							struct pblk_ctx *ctx)
+			     struct pblk_ctx *ctx)
 {
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 	struct pblk_ctx *c, *r;
@@ -960,9 +956,6 @@ try:
  *  - Remap failed writes to a new request
  *  - Move written data on grown bad block(s) to new block(s)
  *  - Mark grown bad block(s) as bad and return to media manager
- *
- *  pblk_end_w_fail is in charge of identifying the bad writes and mark the
- *  blocks associated to the write ppas as bad. JAVIER:: COMPLETE THIS.
  *
  *  This function assumes that ppas in rqd are in generic mode. This is,
  *  nvm_addr_to_generic_mode(dev, rqd) has been called.
@@ -1040,7 +1033,6 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 			continue;
 
 		prev_ppa.ppa = ppa.ppa;
-
 		pblk_run_recovery(pblk, w_ctx->ppa.rblk);
 	}
 
@@ -1124,7 +1116,7 @@ void pblk_end_io(struct nvm_rq *rqd)
 }
 
 static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
-						struct pblk_ctx *ctx)
+			   struct pblk_ctx *ctx)
 {
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 	unsigned int valid_secs = c_ctx->nr_valid;
@@ -1156,51 +1148,42 @@ static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 
 #ifdef CONFIG_NVM_DEBUG
 	if (nvm_boundary_checks(pblk->dev, rqd->ppa_list, rqd->nr_ppas))
-		BUG_ON(1);
-		/* WARN_ON(1); */
+		WARN_ON(1);
 #endif
 
 out:
 	return ret;
 }
 
-/* TODO: Need to implement the different strategies */
 int pblk_calc_secs_to_sync(struct pblk *pblk, unsigned long secs_avail,
-				  unsigned long secs_to_flush)
+			   unsigned long secs_to_flush)
 {
 	int max = pblk->max_write_pgs;
 	int min = pblk->min_write_pgs;
-	int sync = NVM_SYNC_HARD; /* TODO: Move to sysfs and put it in pblk */
 	int secs_to_sync = 0;
 
-	switch (sync) {
-	case NVM_SYNC_SOFT:
-		if (secs_avail >= max)
-			secs_to_sync = max;
-		break;
-	case NVM_SYNC_HARD:
-	case NVM_SYNC_OPORT:
-		if ((secs_avail >= max) || (secs_to_flush >= max)) {
-			secs_to_sync = max;
-		} else if (secs_avail >= min) {
-			if (secs_to_flush) {
-				secs_to_sync = min * (secs_to_flush / min);
-				while (1) {
-					int inc = secs_to_sync + min;
-					if (inc <= secs_avail && inc <= max)
-						secs_to_sync += min;
-					else
-						break;
-				}
-			} else
-				secs_to_sync = min * (secs_avail / min);
-		} else {
-			if (secs_to_flush && sync != NVM_SYNC_OPORT)
-				secs_to_sync = min;
-		}
+	if ((secs_avail >= max) || (secs_to_flush >= max)) {
+		secs_to_sync = max;
+	} else if (secs_avail >= min) {
+		if (secs_to_flush) {
+			secs_to_sync = min * (secs_to_flush / min);
+			while (1) {
+				int inc = secs_to_sync + min;
+				if (inc <= secs_avail && inc <= max)
+					secs_to_sync += min;
+				else
+					break;
+			}
+		} else
+			secs_to_sync = min * (secs_avail / min);
+	} else {
+		if (secs_to_flush)
+			secs_to_sync = min;
 	}
 
+#ifdef CONFIG_NVM_DEBUG
 	BUG_ON(!secs_to_sync && secs_to_flush);
+#endif
 
 	return secs_to_sync;
 }
@@ -1296,9 +1279,8 @@ fail_free_bio:
 	if (c_ctx->nr_padded)
 		pblk_bio_free_pages(pblk, bio, secs_to_sync, c_ctx->nr_padded);
 fail_sync:
-	/* Fail is probably caused by a locked lba - kick the queue to avoid a
-	 * deadlock in the case that no new I/Os are coming in.
-	 * TODO: Look into this now that there it no locking
+	/* Kick the queue to avoid a deadlock in the case that no new I/Os are
+	 * coming in.
 	 */
 	pblk_write_kick(pblk);
 end_rollback:
@@ -1311,7 +1293,7 @@ fail_rqd:
 
 /* The ppa in pblk_addr comes with an offset format, not a global format */
 static void pblk_page_pad_invalidate(struct pblk *pblk, struct pblk_block *rblk,
-							struct ppa_addr a)
+				     struct ppa_addr a)
 {
 	WARN_ON(pblk_gc_invalidate_sec(rblk, a));
 
@@ -1348,9 +1330,9 @@ out:
 }
 
 static int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
-				unsigned int sentry, struct ppa_addr *ppa_list,
-				struct pblk_sec_meta *meta_list,
-				unsigned int nr_secs, unsigned int valid_secs)
+			 unsigned int sentry, struct ppa_addr *ppa_list,
+			 struct pblk_sec_meta *meta_list,
+			 unsigned int nr_secs, unsigned int valid_secs)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct pblk_blk_rec_lpg *rlpg = rblk->rlpg;
@@ -1381,7 +1363,7 @@ static int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 		ppa_list[i] =
 			pblk_ppa_to_gaddr(dev, global_addr(pblk, rblk, paddr));
 
-		/* write context for target bio completion on write buffer. Note
+		/* Write context for target bio completion on write buffer. Note
 		 * that the write buffer is protected by the sync backpointer,
 		 * and only one of the writer threads have access to each
 		 * specific entry at a time. Thus, it is safe to modify the
@@ -1398,7 +1380,6 @@ static int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 		} else {
 			meta_list[i].lba = ADDR_EMPTY;
 			lba_list[paddr] = ADDR_EMPTY;
-			/* invalidate padded ppas immediately */
 			pblk_page_pad_invalidate(pblk, rblk,
 							addr_to_ppa(paddr));
 			rlpg->nr_padded++;
@@ -1409,11 +1390,8 @@ static int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 	return 0;
 }
 
-
-
-
 static int pblk_setup_pad_rq(struct pblk *pblk, struct pblk_block *rblk,
-				struct nvm_rq *rqd, struct pblk_ctx *ctx)
+			     struct nvm_rq *rqd, struct pblk_ctx *ctx)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
@@ -1481,8 +1459,7 @@ static int pblk_setup_pad_rq(struct pblk *pblk, struct pblk_block *rblk,
 
 #ifdef CONFIG_NVM_DEBUG
 	if (nvm_boundary_checks(dev, rqd->ppa_list, rqd->nr_ppas))
-		BUG_ON(1);
-		/* WARN_ON(1); */
+		WARN_ON(1);
 #endif
 
 out:
@@ -1490,7 +1467,7 @@ out:
 }
 
 static void pblk_pad_blk(struct pblk *pblk, struct pblk_block *rblk,
-							int nr_free_secs)
+			 int nr_free_secs)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct bio *bio;
@@ -1574,7 +1551,7 @@ static inline u64 pblk_nr_free_secs(struct pblk *pblk, struct pblk_block *rblk)
 }
 
 /*
- * XXX: For now, we pad the whole block. In the future, pad only the pages that
+ * TODO: For now, we pad the whole block. In the future, pad only the pages that
  * are needed to guarantee that future reads will come, and delegate bringing up
  * the block for writing to the bring up recovery. Basically, this means
  * implementing l2p snapshot and in case of power failure, if a block belongs
@@ -1705,36 +1682,8 @@ try_lun:
 	}
 
 #ifdef CONFIG_NVM_DEBUG
-	if (nvm_boundary_checks(pblk->dev, ppa_list, nr_secs)) {
-		u64 gaddr;
-		struct ppa_addr p;
-		int i;
-
-		printk(KERN_CRIT "FAIL: lun:%u,blk:%lu,n:%u,cur:%lu/%lu\n",
-				rlun->parent->id,
-				rblk->parent->id,
-				nr_secs,
-				rblk->cur_sec, rblk->cur_sec - nr_secs);
-
-		for (i = 0; i < nr_secs; i++) {
-			gaddr = global_addr(pblk, rblk,
-						rblk->cur_sec - nr_secs + i);
-			p = pblk_ppa_to_gaddr(pblk->dev, gaddr);
-			printk(KERN_CRIT "g:%llu,gen:%llu - ch:%u/%u,pl:%u/%u, "
-					"lun:%u/%u,blk:%u/%u,pg:%u/%u,sec:%u/%u\n",
-				gaddr,
-				p.ppa,
-				ppa_list[i].g.ch, p.g.ch,
-				ppa_list[i].g.pl, p.g.pl,
-				ppa_list[i].g.lun, p.g.lun,
-				ppa_list[i].g.blk, p.g.blk,
-				ppa_list[i].g.pg, p.g.pg,
-				ppa_list[i].g.sec, p.g.sec);
-		}
-
-		BUG_ON(1);
-	}
-		/* WARN_ON(1); */
+	if (nvm_boundary_checks(pblk->dev, ppa_list, nr_secs))
+		WARN_ON(1);
 #endif
 
 	spin_unlock(&rlun->lock);
@@ -1841,7 +1790,7 @@ void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk)
 }
 
 int pblk_alloc_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
-		      struct pblk_ctx *ctx, unsigned int nr_secs)
+		    struct pblk_ctx *ctx, unsigned int nr_secs)
 {
 	struct nvm_dev *dev = pblk->dev;
 
@@ -1888,3 +1837,4 @@ int pblk_alloc_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 
 	return 0;
 }
+
