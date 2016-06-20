@@ -376,9 +376,11 @@ put_back:
 static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
 {
 	struct nvm_lun *lun = rlun->parent;
-	int emergency_gc;
 	struct pblk_block_ws *blk_ws;
+	struct pblk_block *rblk, *trblk;
 	unsigned int nr_blocks_need;
+	int emergency_gc;
+	LIST_HEAD(gc_list);
 
 	nr_blocks_need = pblk->dev->blks_per_lun / GC_LIMIT_INVERSE;
 
@@ -387,12 +389,14 @@ static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
 
 	spin_lock(&rlun->lock);
 	emergency_gc = pblk_is_emergency_gc(pblk, lun->id);
-
 	while (nr_blocks_need > lun->nr_free_blocks &&
 					!list_empty(&rlun->prio_list)) {
-		struct pblk_block *rblk = block_prio_find_max(rlun);
-		struct nvm_block *block = rblk->parent;
+		rblk = block_prio_find_max(rlun);
+		list_move_tail(&rblk->prio, &gc_list);
+	}
+	spin_unlock(&rlun->lock);
 
+	list_for_each_entry_safe(rblk, trblk, &gc_list, prio) {
 		if (!rblk->nr_invalid_secs)
 			break;
 
@@ -404,7 +408,7 @@ static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
 
 		BUG_ON(!block_is_full(pblk, rblk));
 
-		pr_debug("pblk: selected block '%lu' for GC\n", block->id);
+		pr_debug("pblk: victim block '%lu' for GC\n", rblk->parent->id);
 
 		blk_ws->pblk = pblk;
 		blk_ws->rblk = rblk;
@@ -415,6 +419,7 @@ static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
 		nr_blocks_need--;
 	}
 
+	spin_lock(&rlun->lock);
 	if (unlikely(emergency_gc) &&
 				lun->nr_free_blocks > pblk->gc_ths.emergency) {
 		pr_debug("pblk: exit emergency GC. Lun:%d\n", lun->id);
