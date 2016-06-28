@@ -233,11 +233,18 @@ int nvm_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 }
 EXPORT_SYMBOL(nvm_submit_io);
 
-int nvm_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
+int nvm_erase_blk(struct nvm_dev *dev, struct nvm_block *blk, int flags)
 {
-	return dev->mt->erase_blk(dev, blk, 0);
+	return dev->mt->erase_blk(dev, blk, flags);
 }
 EXPORT_SYMBOL(nvm_erase_blk);
+
+int nvm_erase_list(struct nvm_dev *dev, struct ppa_addr *ppa_list, int nr_ppas,
+								int flags)
+{
+	return dev->mt->erase_list(dev, ppa_list, nr_ppas, flags);
+}
+EXPORT_SYMBOL(nvm_erase_list);
 
 void nvm_addr_to_generic_mode(struct nvm_dev *dev, struct nvm_rq *rqd)
 {
@@ -316,9 +323,11 @@ void nvm_free_rqd_ppalist(struct nvm_dev *dev, struct nvm_rq *rqd)
 }
 EXPORT_SYMBOL(nvm_free_rqd_ppalist);
 
-int nvm_erase_ppa(struct nvm_dev *dev, struct ppa_addr *ppas, int nr_ppas)
+int nvm_erase_ppa(struct nvm_dev *dev, struct ppa_addr *ppas, int nr_ppas,
+								int flags)
 {
 	struct nvm_rq rqd;
+	int unfold;
 	int ret;
 
 	if (!dev->ops->erase_block)
@@ -326,11 +335,14 @@ int nvm_erase_ppa(struct nvm_dev *dev, struct ppa_addr *ppas, int nr_ppas)
 
 	memset(&rqd, 0, sizeof(struct nvm_rq));
 
-	ret = nvm_set_rqd_ppalist(dev, &rqd, ppas, nr_ppas, 1);
+	unfold = (flags & (NVM_IO_QUAD_ACCESS | NVM_IO_DUAL_ACCESS)) ? 0 : 1;
+	ret = nvm_set_rqd_ppalist(dev, &rqd, ppas, nr_ppas, unfold);
 	if (ret)
 		return ret;
 
 	nvm_generic_to_addr_mode(dev, &rqd);
+
+	rqd.flags = flags;
 
 	ret = dev->ops->erase_block(dev, &rqd);
 

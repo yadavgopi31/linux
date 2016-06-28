@@ -670,12 +670,17 @@ static int gen_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 	return dev->ops->submit_io(dev, rqd);
 }
 
-static int gen_erase_blk(struct nvm_dev *dev, struct nvm_block *blk,
-							unsigned long flags)
+static int gen_erase_blk(struct nvm_dev *dev, struct nvm_block *blk, int flags)
 {
 	struct ppa_addr addr = block_to_ppa(dev, blk);
 
-	return nvm_erase_ppa(dev, &addr, 1);
+	return nvm_erase_ppa(dev, &addr, 1, flags);
+}
+
+static int gen_erase_list(struct nvm_dev *dev, struct ppa_addr *ppa_list,
+							int nr_ppas, int flags)
+{
+	return nvm_erase_ppa(dev, ppa_list, nr_ppas, flags);
 }
 
 static int gen_reserve_lun(struct nvm_dev *dev, int lunid)
@@ -729,6 +734,7 @@ static struct nvmm_type gen = {
 
 	.submit_io		= gen_submit_io,
 	.erase_blk		= gen_erase_blk,
+	.erase_list		= gen_erase_list,
 
 	.mark_blk		= gen_mark_blk,
 
