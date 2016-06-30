@@ -386,6 +386,7 @@ static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
 	struct pblk_block *rblk, *trblk;
 	unsigned int nr_blocks_need;
 	int emergency_gc;
+	int emergency_thres;
 	LIST_HEAD(gc_list);
 
 	nr_blocks_need = pblk->dev->blks_per_lun / GC_LIMIT_INVERSE;
@@ -395,17 +396,21 @@ static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
 
 	spin_lock(&rlun->lock);
 	emergency_gc = pblk_is_emergency_gc(pblk, lun->id);
+
 	while (nr_blocks_need > lun->nr_free_blocks &&
 					!list_empty(&rlun->prio_list)) {
 		rblk = block_prio_find_max(rlun);
+		if (!rblk->nr_invalid_secs)
+			goto start_gc;
+
 		list_move_tail(&rblk->prio, &gc_list);
 	}
+
+start_gc:
+	emergency_thres = lun->nr_free_blocks < pblk->gc_ths.emergency;
 	spin_unlock(&rlun->lock);
 
 	list_for_each_entry_safe(rblk, trblk, &gc_list, prio) {
-		if (!rblk->nr_invalid_secs)
-			break;
-
 		blk_ws = mempool_alloc(pblk->blk_ws_pool, GFP_ATOMIC);
 		if (!blk_ws)
 			break;
@@ -425,13 +430,13 @@ static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
 		nr_blocks_need--;
 	}
 
-	spin_lock(&rlun->lock);
-	if (unlikely(emergency_gc) &&
-				lun->nr_free_blocks > pblk->gc_ths.emergency) {
-		pr_debug("pblk: exit emergency GC. Lun:%d\n", lun->id);
+	/* Exit emergency GC when above the GC threshold */
+	if (unlikely(emergency_gc) && !emergency_thres) {
+		pr_err("pblk: exit emergency GC. Lun:%d\n", lun->id);
+		spin_lock(&rlun->lock);
 		pblk_emergency_gc_off(pblk, lun->id);
+		spin_unlock(&rlun->lock);
 	}
-	spin_unlock(&rlun->lock);
 
 	if (unlikely(!list_empty(&rlun->bb_list)))
 		pblk_recov_clean_bb_list(pblk, rlun);
@@ -449,14 +454,43 @@ void pblk_gc(struct work_struct *work)
 		pblk_lun_gc(pblk, rlun);
 }
 
-static void pblk_gc_kick(struct pblk *pblk)
+int pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun)
 {
-	queue_work(pblk->krqd_wq, &pblk->ws_gc);
+	struct nvm_lun *lun = rlun->parent;
+	int emergency_thres;
+	int lun_emergency_gc;
+
+	lun_emergency_gc = pblk_is_emergency_gc(pblk, lun->id);
+	emergency_thres = lun->nr_free_blocks < pblk->gc_ths.emergency;
+
+	/* If the number of free blocks in the LUN goes below the threshold, get
+	 * in emergency GC mode.
+	 *
+	 * TODO: This should be progressive and affect the rate limiter to
+	 * reduce user I/O as the disk gets more and more full. For now, we only
+	 * implement emergency GC: when the disk reaches capacity, user I/O is
+	 * stopped and GC is the only one adding entries to the write buffer in
+	 * order to free blocks
+	 */
+	if (!lun_emergency_gc && emergency_thres) {
+		pr_err("pblk: enter emergency GC. Lun:%d\n", lun->id);
+		spin_lock(&rlun->lock);
+		pblk_emergency_gc_on(pblk, lun->id);
+		spin_unlock(&rlun->lock);
+		return 1;
+	}
+
+	return 0;
 }
 
 /*
  * timed GC every interval.
  */
+static void pblk_gc_kick(struct pblk *pblk)
+{
+	queue_work(pblk->krqd_wq, &pblk->ws_gc);
+}
+
 static void pblk_gc_timer(unsigned long data)
 {
 	struct pblk *pblk = (struct pblk *)data;

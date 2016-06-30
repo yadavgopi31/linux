@@ -291,7 +291,7 @@ static int pblk_core_init(struct pblk *pblk)
 	if (!pblk->gc_ths.emergency_luns)
 		goto free_kprov_wq;
 
-	pblk->gc_ths.emergency = 2;
+	pblk->gc_ths.emergency = 4;
 	atomic_set(&pblk->user_io_rate, 0);
 
 	/* Init write buffer */

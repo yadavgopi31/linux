@@ -1270,38 +1270,22 @@ void pblk_block_pool_provision(struct work_struct *work)
 	struct pblk_block *rblk;
 	struct pblk_prov_queue *queue;
 	struct pblk_lun *rlun;
-	struct nvm_lun *lun;
-	int gen_emergency_gc = pblk_emergency_gc_mode(pblk);
-	int lun_emergency_gc;
-	int emergency_thres;
+	int gen_emergency_gc;
 	int nr_luns = block_pool->nr_luns;
 	int nr_elems_inc;
 	int bit;
 
 provision:
+	gen_emergency_gc = pblk_emergency_gc_mode(pblk);
+
 	bit = -1;
 	while ((bit = find_next_zero_bit(bitmap, nr_luns, bit + 1)) <
 								nr_luns) {
 		rlun = &pblk->luns[bit];
 		queue = &block_pool->queues[bit];
 
-		lun = rlun->parent;
-		lun_emergency_gc = pblk_is_emergency_gc(pblk, lun->id);
-
-		/* If the number of free blocks in the LUN goes below the
-		 * threshold, get in emergency GC mode.
-		 *
-		 * TODO: This should be progressive and affect the rate limiter
-		 * to reduce user I/O as the disk gets more and more full. For
-		 * now, we only implement emergency GC: when the disk reaches
-		 * capacity, user I/O is stopped and GC is the only one adding
-		 * entries to the write buffer in order to free blocks
-		 */
-		emergency_thres = lun->nr_free_blocks < pblk->gc_ths.emergency;
-		if (!lun_emergency_gc && emergency_thres) {
-			pr_debug("pblk: enter emergency GC. Lun:%d\n", lun->id);
-			pblk_emergency_gc_on(pblk, lun->id);
-			lun_emergency_gc = gen_emergency_gc = 1;
+		if (pblk_enable_emergengy_gc(pblk, rlun)) {
+			gen_emergency_gc = 1;
 			goto next;
 		}
 
