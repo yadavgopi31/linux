@@ -774,7 +774,8 @@ static int pblk_setup_write_to_cache(struct pblk *pblk, struct bio *bio,
 }
 
 static void pblk_update_cache_map(struct pblk *pblk, struct bio *bio,
-				  struct pblk_w_ctx *w_ctx, unsigned long pos)
+				  struct pblk_w_ctx *w_ctx, unsigned long pos,
+				  int inval_entry)
 {
 	void *data = bio_data(bio);
 	struct ppa_addr ppa;
@@ -783,7 +784,7 @@ static void pblk_update_cache_map(struct pblk *pblk, struct bio *bio,
 	ppa = pblk_cacheline_to_ppa(pblk_rb_wrap_pos(&pblk->rwb, pos));
 
 try:
-	if (pblk_update_map(pblk, w_ctx->lba, NULL, ppa)) {
+	if (pblk_update_map(pblk, w_ctx->lba, NULL, ppa, inval_entry)) {
 		schedule();
 		goto try;
 	}
@@ -823,7 +824,7 @@ static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 	for (i = 0; i < nr_entries; i++) {
 		w_ctx.lba = laddr + i;
 
-		pblk_update_cache_map(pblk, bio, &w_ctx, pos + i);
+		pblk_update_cache_map(pblk, bio, &w_ctx, pos + i, 1);
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 	}
 
@@ -865,7 +866,7 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 #endif
 		kref_get(&ref_buf->ref);
 
-		pblk_update_cache_map(pblk, bio, &w_ctx, pos + valid_secs);
+		pblk_update_cache_map(pblk, bio, &w_ctx, pos + valid_secs, 0);
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 		valid_secs++;
 	}

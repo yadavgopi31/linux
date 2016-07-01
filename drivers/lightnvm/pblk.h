@@ -868,7 +868,8 @@ static void pblk_page_invalidate(struct pblk *pblk, struct pblk_addr *a)
 }
 
 static inline int pblk_update_map(struct pblk *pblk, sector_t laddr,
-				struct pblk_block *rblk, struct ppa_addr ppa)
+				  struct pblk_block *rblk, struct ppa_addr ppa,
+				  int inval_entry)
 {
 	struct pblk_addr *gp;
 	int ret = 0;
@@ -882,8 +883,6 @@ static inline int pblk_update_map(struct pblk *pblk, sector_t laddr,
 
 	spin_lock(&pblk->trans_lock);
 	gp = &pblk->trans_map[laddr];
-	if (gp->rblk)
-		pblk_page_invalidate(pblk, gp);
 
 	if (!ppa_empty(gp->ppa) &&
 		nvm_addr_in_cache(gp->ppa) &&
@@ -891,6 +890,9 @@ static inline int pblk_update_map(struct pblk *pblk, sector_t laddr,
 		ret = 1;
 		goto out;
 	}
+
+	if (inval_entry && gp->rblk)
+		pblk_page_invalidate(pblk, gp);
 
 	gp->ppa = ppa;
 	gp->rblk = rblk;
