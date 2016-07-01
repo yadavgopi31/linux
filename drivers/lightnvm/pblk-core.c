@@ -1195,7 +1195,7 @@ int pblk_block_pool_init(struct pblk *pblk)
 	 * increased if having pressure on the write thread
 	 */
 	block_pool->nr_luns = pblk->nr_luns;
-	block_pool->qd = 1;
+	block_pool->qd = 3;
 
 	block_pool->queues = kmalloc(sizeof(struct pblk_prov_queue) *
 					block_pool->nr_luns, GFP_KERNEL);
@@ -1272,7 +1272,7 @@ void pblk_block_pool_provision(struct work_struct *work)
 	struct pblk_lun *rlun;
 	int gen_emergency_gc;
 	int nr_luns = block_pool->nr_luns;
-	int nr_elems_inc;
+	int nr_elems;
 	int bit;
 
 provision:
@@ -1297,11 +1297,11 @@ provision:
 
 		spin_lock(&queue->lock);
 		list_add_tail(&rblk->list, &queue->list);
-		nr_elems_inc = ++queue->nr_elems;
-
-		if (nr_elems_inc == block_pool->qd)
-			set_bit(bit, bitmap);
+		nr_elems = ++queue->nr_elems;
 		spin_unlock(&queue->lock);
+
+		if (nr_elems == block_pool->qd)
+			set_bit(bit, bitmap);
 
 next:
 		;
@@ -1319,28 +1319,27 @@ static struct pblk_block *pblk_block_pool_get(struct pblk *pblk,
 	struct pblk_prov *block_pool = &pblk->block_pool;
 	struct pblk_block *rblk = NULL;
 	struct pblk_prov_queue *queue;
-	int bit = rlun->parent->id;
-	int nr_elems_dec;
-
-#ifdef CONFIG_NVM_DEBUG
-	BUG_ON(bit > block_pool->nr_luns);
-#endif
+	int bit = rlun->prov_pos;
+	int nr_elems;
 
 	queue = &block_pool->queues[bit];
 
 	spin_lock(&queue->lock);
 	if (!queue->nr_elems) {
+		block_pool->qd++;
 		spin_unlock(&queue->lock);
 		goto out;
 	}
 
 	rblk = list_first_entry(&queue->list, struct pblk_block, list);
-	nr_elems_dec = --queue->nr_elems;
-
-	/* TODO: Follow a richer heuristic based on flash type too*/
-	if (nr_elems_dec < 2)
-		clear_bit(bit, block_pool->bitmap);
+	nr_elems = --queue->nr_elems;
 	spin_unlock(&queue->lock);
+
+	/* TODO: Follow a richer heuristic based on flash type too */
+	if (nr_elems < 2) {
+		pblk_prov_kick(pblk);
+		clear_bit(bit, block_pool->bitmap);
+	}
 
 	spin_lock(&rlun->lock_lists);
 	list_move_tail(&rblk->list, &rlun->open_list);
@@ -1354,11 +1353,8 @@ static int pblk_replace_blk(struct pblk *pblk, struct pblk_block *rblk,
 			    struct pblk_lun *rlun, int is_bb, int emergency_gc)
 {
 	rblk = pblk_block_pool_get(pblk, rlun);
-	if (!rblk) {
-		pr_err_ratelimited("NO PREALLOC BLOCK. lun:%u\n",
-							rlun->parent->id);
+	if (!rblk)
 		return 0;
-	}
 
 	pblk_set_lun_cur(rlun, rblk);
 	return 1;

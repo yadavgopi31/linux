@@ -409,6 +409,7 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 
 		rlun = &pblk->luns[i];
 		rlun->parent = lun;
+		rlun->prov_pos = i;
 		rlun->blocks = vzalloc(sizeof(struct pblk_block) *
 						pblk->dev->blks_per_lun);
 		if (!rlun->blocks) {

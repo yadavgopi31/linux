@@ -265,6 +265,10 @@ struct pblk_lun {
 					 *disposed
 					 */
 
+	int prov_pos;			/* Position of the lun on the
+					 * provisioning bitmap
+					 */
+
 	spinlock_t lock_lists;
 	spinlock_t lock;
 };
