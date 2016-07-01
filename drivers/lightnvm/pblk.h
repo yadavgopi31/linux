@@ -287,12 +287,15 @@ struct pblk_prov_queue {
 	int nr_elems;
 };
 
-struct pblk_prov {
+struct pblk_blk_pool {
 	struct pblk_prov_queue *queues;
 	spinlock_t lock;
 	unsigned long *bitmap;
 	int nr_luns;
 	int qd;
+	struct timer_list timer;
+	struct workqueue_struct *wq;
+	struct work_struct ws;
 };
 
 #define NVM_MEM_PAGE_WRITE (8)
@@ -373,7 +376,6 @@ struct pblk {
 	struct bio_list requeue_bios;
 	struct work_struct ws_requeue;
 	struct work_struct ws_gc;
-	struct work_struct ws_prov;
 	struct task_struct *ts_writer;
 
 	/* Simple translation map of logical addresses to physical addresses.
@@ -395,14 +397,12 @@ struct pblk {
 	struct workqueue_struct *krqd_wq;
 	struct workqueue_struct *kgc_wq;
 	struct workqueue_struct *kw_wq;
-	struct workqueue_struct *kprov_wq;
 
 	atomic_t write_inflight;
 	wait_queue_head_t wait;
 	struct timer_list wtimer;
 
-	struct pblk_prov block_pool;
-	struct timer_list prov_timer;
+	struct pblk_blk_pool blk_pool;
 };
 
 struct pblk_block_ws {
@@ -526,10 +526,12 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 			     unsigned long flags);
 void pblk_may_submit_write(struct pblk *pblk, int nr_secs);
 
-/* pblk provisioning */
-int pblk_block_pool_init(struct pblk *pblk);
-void pblk_block_pool_free(struct pblk *pblk);
-void pblk_block_pool_provision(struct work_struct *work);
+/* pblk block pool*/
+int pblk_blk_pool_init(struct pblk *pblk);
+void pblk_blk_pool_free(struct pblk *pblk);
+void pblk_blk_pool_run(struct pblk *pblk);
+void pblk_blk_pool_stop(struct pblk *pblk);
+struct pblk_block *pblk_blk_pool_get(struct pblk *pblk, struct pblk_lun *lun);
 
 /* pblk recovery */
 void pblk_submit_rec(struct work_struct *work);

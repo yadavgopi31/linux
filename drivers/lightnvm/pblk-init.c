@@ -261,11 +261,6 @@ static int pblk_core_init(struct pblk *pblk)
 	if (!pblk->kw_wq)
 		goto free_blk_meta_pool;
 
-	pblk->kprov_wq = alloc_workqueue("pblk-prov",
-				WQ_MEM_RECLAIM | WQ_UNBOUND, 1);
-	if (!pblk->kprov_wq)
-		goto free_kw_wq;
-
 	/* The write buffer has space for one block per active LUN on the
 	 * target. In emergency GC we need to be able to flush the whole buffer,
 	 * which in the worst case is full with user I/O. We leave 2 extra
@@ -275,7 +270,7 @@ static int pblk_core_init(struct pblk *pblk)
 			kzalloc(BITS_TO_LONGS(pblk->dev->nr_luns) *
 					sizeof(unsigned long), GFP_KERNEL);
 	if (!pblk->gc_ths.emergency_luns)
-		goto free_kprov_wq;
+		goto free_kw_wq;
 
 	pblk->gc_ths.emergency = 4;
 	atomic_set(&pblk->user_io_rate, 0);
@@ -289,8 +284,6 @@ static int pblk_core_init(struct pblk *pblk)
 
 free_emergency_blocks:
 	kfree(pblk->gc_ths.emergency_luns);
-free_kprov_wq:
-	destroy_workqueue(pblk->kprov_wq);
 free_kw_wq:
 	destroy_workqueue(pblk->kw_wq);
 free_blk_meta_pool:
@@ -312,9 +305,6 @@ static void pblk_core_free(struct pblk *pblk)
 {
 	if (pblk->kw_wq)
 		destroy_workqueue(pblk->kw_wq);
-
-	if (pblk->kprov_wq)
-		destroy_workqueue(pblk->kprov_wq);
 
 	kfree(pblk->gc_ths.emergency_luns);
 
@@ -456,6 +446,7 @@ static void pblk_free(struct pblk *pblk)
 {
 	pblk_map_free(pblk);
 	pblk_core_free(pblk);
+	pblk_blk_pool_free(pblk);
 	pblk_luns_free(pblk);
 	pblk_area_free(pblk);
 
@@ -469,8 +460,10 @@ static void pblk_tear_down(struct pblk *pblk)
 	pblk_flush_writer(pblk);
 	kthread_stop(pblk->ts_writer);
 
-	del_timer(&pblk->prov_timer);
-	pblk_block_pool_free(pblk);
+	/* TODO: must wait on it to finish, else
+	 *       blk pool might be used after free
+	 */
+	pblk_blk_pool_stop(pblk);
 
 	pblk_pad_open_blks(pblk);
 	pblk_rb_sync_l2p(&pblk->rwb);
@@ -560,9 +553,6 @@ static int pblk_luns_configure(struct pblk *pblk)
 	struct pblk_block *rblk;
 	int i;
 
-	if (pblk_block_pool_init(pblk))
-		return -ENOMEM;
-
 	for (i = 0; i < pblk->nr_luns; i++) {
 		rlun = &pblk->luns[i];
 
@@ -588,8 +578,6 @@ err:
 		if (rlun->cur)
 			pblk_put_blk(pblk, rlun->cur);
 	}
-
-	pblk_block_pool_free(pblk);
 
 	return -ENOMEM;
 }
@@ -829,7 +817,6 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	spin_lock_init(&pblk->pblk_lock);
 	INIT_WORK(&pblk->ws_requeue, pblk_requeue);
 	INIT_WORK(&pblk->ws_gc, pblk_gc);
-	INIT_WORK(&pblk->ws_prov, pblk_block_pool_provision);
 	pblk->ts_writer = kthread_create(pblk_media_write, pblk,
 								"pblk-writer");
 
@@ -893,6 +880,12 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 		goto err;
 	}
 
+	ret = pblk_blk_pool_init(pblk);
+	if (ret) {
+		pr_err("pblk: could not initialize block pooling\n");
+		goto err;
+	}
+
 	ret = pblk_luns_configure(pblk);
 	if (ret) {
 		pr_err("pblk: not enough blocks available in LUNs.\n");
@@ -919,6 +912,8 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 
 	setup_timer(&pblk->wtimer, pblk_write_timer_fn, (unsigned long)pblk);
 	mod_timer(&pblk->wtimer, jiffies + msecs_to_jiffies(100));
+
+	pblk_blk_pool_run(pblk);
 
 	wake_up_process(pblk->ts_writer);
 	return pblk;
