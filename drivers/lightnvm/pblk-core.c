@@ -1282,13 +1282,13 @@ provision:
 
 		if (pblk_enable_emergengy_gc(pblk, rlun)) {
 			gen_emergency_gc = 1;
-			goto next;
+			continue;
 		}
 
 		rblk = pblk_get_blk(pblk, rlun, gen_emergency_gc);
 		if (!rblk) {
 			pr_debug("pblk: LUN %d has no blocks\n", bit);
-			goto next;
+			continue;
 		}
 
 		spin_lock(&queue->lock);
@@ -1298,9 +1298,6 @@ provision:
 
 		if (nr_elems == block_pool->qd)
 			set_bit(bit, bitmap);
-
-next:
-		;
 	}
 
 	if (!bitmap_full(block_pool->bitmap, nr_luns))
