@@ -13,13 +13,10 @@
  * General Public License for more details.
  *
  * TODO:
- *   - Improve requeueing mechanism for buffered writes
- *   - Implement L2P snapshoting on graceful tear down. We need the media
- *   manager to provide a root FS to store it.
- *   - Implement read-ahead
+ *   - Implement L2P snapshot on graceful tear down.
  *   - Separate mapping from actual stripping strategy to enable
- *   workload-specific optimizations
- *   - Implement for new MLC & TLC chips
+ *     workload-specific optimizations
+ *   - Implement support for new MLC & TLC chips
  */
 
 #include "pblk.h"
@@ -27,21 +24,34 @@
 
 struct nvm_rq *pblk_alloc_rqd(struct pblk *pblk, int rw)
 {
+	mempool_t *pool;
 	struct nvm_rq *rqd;
-	mempool_t *pool = (rw == WRITE) ? pblk->w_rq_pool : pblk->r_rq_pool;
-	int size = (rw == WRITE) ? pblk_w_rq_size : pblk_r_rq_size;
+	int rq_size;
+
+	if (rw == WRITE) {
+		pool = pblk->w_rq_pool;
+		rq_size = pblk_w_rq_size;
+	} else {
+		pool = pblk->r_rq_pool;
+		rq_size = pblk_r_rq_size;
+	}
 
 	rqd = mempool_alloc(pool, GFP_KERNEL);
 	if (!rqd)
 		return ERR_PTR(-ENOMEM);
 
-	memset(rqd, 0, size);
+	memset(rqd, 0, rq_size);
 	return rqd;
 }
 
 void pblk_free_rqd(struct pblk *pblk, struct nvm_rq *rqd, int rw)
 {
-	mempool_t *pool = (rw == WRITE) ? pblk->w_rq_pool : pblk->r_rq_pool;
+	mempool_t *pool;
+	
+	if (rw == WRITE)
+		pool = pblk->w_rq_pool;
+	else
+		pool = pblk->r_rq_pool;
 
 	mempool_free(rqd, pool);
 }
@@ -297,8 +307,8 @@ static void pblk_unlock_seq_reads(struct pblk *pblk, struct ppa_addr *ppas,
 }
 
 static void pblk_unlock_rand_reads(struct pblk *pblk, struct ppa_addr *ppas,
-				  int *cache_read_state, u64 *lba_list,
-				  int nr_secs)
+				   int *cache_read_state, u64 *lba_list,
+				   int nr_secs)
 {
 	struct pblk_addr *gp;
 	sector_t lba;
