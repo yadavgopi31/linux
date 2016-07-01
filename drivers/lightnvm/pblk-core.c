@@ -296,7 +296,6 @@ static void pblk_unlock_seq_reads(struct pblk *pblk, struct ppa_addr *ppas,
 	spin_unlock(&pblk->trans_lock);
 }
 
-
 static void pblk_unlock_rand_reads(struct pblk *pblk, struct ppa_addr *ppas,
 				  int *cache_read_state, u64 *lba_list,
 				  int nr_secs)
@@ -774,6 +773,22 @@ static int pblk_setup_write_to_cache(struct pblk *pblk, struct bio *bio,
 	return 1;
 }
 
+static void pblk_update_cache_map(struct pblk *pblk, struct bio *bio,
+				  struct pblk_w_ctx *w_ctx, unsigned long pos)
+{
+	void *data = bio_data(bio);
+	struct ppa_addr ppa;
+
+	pblk_rb_write_entry(&pblk->rwb, data, *w_ctx, pos);
+	ppa = pblk_cacheline_to_ppa(pblk_rb_wrap_pos(&pblk->rwb, pos));
+
+try:
+	if (pblk_update_map(pblk, w_ctx->lba, NULL, ppa)) {
+		schedule();
+		goto try;
+	}
+}
+
 /*
  * Copy data from current bio to write buffer. This if necessary to guarantee
  * that (i) writes to the media at issued at the right granurality and (ii) that
@@ -788,8 +803,6 @@ static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 	sector_t laddr = pblk_get_laddr(bio);
 	struct bio *ctx_bio = (bio->bi_rw & REQ_PREFLUSH) ? bio : NULL;
 	struct pblk_w_ctx w_ctx;
-	struct ppa_addr ppa;
-	void *data;
 	unsigned long pos;
 	unsigned int i;
 	int ret = (ctx_bio) ? NVM_IO_OK : NVM_IO_DONE;
@@ -810,20 +823,7 @@ static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 	for (i = 0; i < nr_entries; i++) {
 		w_ctx.lba = laddr + i;
 
-		data = bio_data(bio);
-		pblk_rb_write_entry(&pblk->rwb, data, w_ctx, pos + i);
-
-		ppa = pblk_cacheline_to_ppa(
-					pblk_rb_wrap_pos(&pblk->rwb, pos + i));
-try:
-		/* The update can fail if the address is in cache and it is
-		 * being read at the moment. Schedule and retry.
-		 */
-		if (pblk_update_map(pblk, laddr + i, NULL, ppa)) {
-			schedule();
-			goto try;
-		}
-
+		pblk_update_cache_map(pblk, bio, &w_ctx, pos + i);
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 	}
 
@@ -838,8 +838,6 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 			     unsigned long flags)
 {
 	struct pblk_w_ctx w_ctx;
-	struct ppa_addr ppa;
-	void *data;
 	struct bio *ctx_bio = NULL;
 	unsigned long pos;
 	unsigned int i, valid_secs = 0;
@@ -867,20 +865,7 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 #endif
 		kref_get(&ref_buf->ref);
 
-		data = bio_data(bio);
-		pblk_rb_write_entry(&pblk->rwb, data, w_ctx, pos + valid_secs);
-
-		ppa = pblk_cacheline_to_ppa(
-				pblk_rb_wrap_pos(&pblk->rwb, pos + valid_secs));
-retry:
-		/* The update can fail if the address is in cache and it is
-		 * being read at the moment. Schedule and retry.
-		 */
-		if (pblk_update_map(pblk, lba_list[i], NULL, ppa)) {
-			io_schedule();
-			goto retry;
-		}
-
+		pblk_update_cache_map(pblk, bio, &w_ctx, pos + valid_secs);
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 		valid_secs++;
 	}
