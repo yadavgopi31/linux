@@ -56,6 +56,32 @@ void pblk_free_rqd(struct pblk *pblk, struct nvm_rq *rqd, int rw)
 	mempool_free(rqd, pool);
 }
 
+static inline void print_ppa(struct ppa_addr *p, char *msg, int error)
+{
+	pr_err("ppa: (%s: %x) ch:%d,pl:%d,lun:%d,blk:%d,pg:%d,sec:%d\n",
+		msg, error,
+		p->g.ch, p->g.pl, p->g.lun, p->g.blk, p->g.pg, p->g.sec);
+}
+
+void pblk_print_failed_rqd(struct nvm_rq *rqd, int error)
+{
+	int offset = -1;
+	struct ppa_addr *p;
+
+	if (rqd->nr_ppas ==  1) {
+		p = &rqd->ppa_addr;
+		print_ppa(p, "rqd", error);
+		return;
+	}
+
+	while ((offset =
+		find_next_bit((void *)&rqd->ppa_status, rqd->nr_ppas,
+						offset + 1)) < rqd->nr_ppas) {
+		p = &rqd->ppa_list[offset];
+		print_ppa(p, "rqd", error);
+	}
+}
+
 /*
  * Increment 'v', if 'v' is below 'below'. Returns true if we succeeded,
  * false if 'v' + 1 would be bigger than 'below'.
@@ -716,8 +742,10 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 	wait_for_completion_io(&wait);
 
 	if (bio->bi_error) {
-		pr_err("pblk: partial sync read failed (%u)\n", bio->bi_error);
-		pblk_print_failed_bio(rqd, rqd->nr_ppas);
+		spin_lock_irq(&pblk->pblk_lock);
+		pblk->read_failed++;
+		spin_unlock_irq(&pblk->pblk_lock);
+		pblk_print_failed_rqd(rqd, bio->bi_error);
 	}
 
 	if (unlikely(nr_secs > 1 && nr_holes == 1)) {
@@ -1096,7 +1124,7 @@ struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
 	if (!rlpg)
 		return NULL;
 
-try:
+retry:
 	blk = nvm_get_blk(pblk->dev, lun, flags);
 	if (!blk) {
 		pr_err("pblk: cannot get new block from media manager\n");
@@ -1119,15 +1147,11 @@ try:
 		nvm_mark_blk(dev, ppa, NVM_BLK_ST_BAD);
 		pblk_retire_blk(pblk, rblk);
 
-		pr_err("pblk: erase error: blk:%lu(ch:%u,lun:%u,pl:%u,blk:%u,pg:%u,sec:%u). Retry\n",
-				rblk->parent->id,
-				ppa.g.ch,
-				ppa.g.lun,
-				ppa.g.pl,
-				ppa.g.blk,
-				ppa.g.pg,
-				ppa.g.sec);
-		goto try;
+		spin_lock_irq(&pblk->pblk_lock);
+		pblk->erase_failed++;
+		spin_unlock_irq(&pblk->pblk_lock);
+		print_ppa(&ppa, "erase", 0);
+		goto retry;
 	}
 
 	return rblk;
@@ -1262,12 +1286,12 @@ void pblk_block_pool_provision(struct work_struct *work)
 {
 	struct pblk *pblk = container_of(work, struct pblk, ws_prov);
 	struct pblk_prov *block_pool = &pblk->block_pool;
-	void *bitmap = block_pool->bitmap;
-	struct pblk_block *rblk;
 	struct pblk_prov_queue *queue;
 	struct pblk_lun *rlun;
-	int gen_emergency_gc;
+	struct pblk_block *rblk;
+	void *bitmap = block_pool->bitmap;
 	int nr_luns = block_pool->nr_luns;
+	int gen_emergency_gc;
 	int nr_elems;
 	int bit;
 
@@ -1293,7 +1317,7 @@ provision:
 
 		spin_lock(&queue->lock);
 		list_add_tail(&rblk->list, &queue->list);
-		nr_elems = ++queue->nr_elems;
+		nr_elems = queue->nr_elems++;
 		spin_unlock(&queue->lock);
 
 		if (nr_elems == block_pool->qd)
@@ -1633,10 +1657,11 @@ static void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd,
 	if (rqd->meta_list)
 		nvm_dev_dma_free(pblk->dev, rqd->meta_list, rqd->dma_meta_list);
 
-	/* TODO: Add this to statistics. Read retry module? */
 	if (bio->bi_error) {
-		pr_err("pblk: read I/O failed. nr_ppas:%d. Failed:\n", nr_secs);
-		pblk_print_failed_bio(rqd, nr_secs);
+		spin_lock_irq(&pblk->pblk_lock);
+		pblk->read_failed++;
+		spin_unlock_irq(&pblk->pblk_lock);
+		pblk_print_failed_rqd(rqd, bio->bi_error);
 	}
 
 	bio_put(bio);
@@ -1960,7 +1985,14 @@ static int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 		/* Write context for target bio completion on write buffer. Note
 		 * that the write buffer is protected by the sync backpointer,
 		 * and only one of the writer threads have access to each
-		 * specific entry at a time. Thus, it is safe to modify the
+		 * specific entry at a time. Thus, {
+			meta_list[i].lba = ADDR_EMPTY;
+			lba_list[paddr] = ADDR_EMPTY;
+			pblk_page_pad_invalidate(pblk, rblk,
+							addr_to_ppa(paddr));
+			rlpg->nr_padded++;
+		}
+it is safe to modify the
 		 * context for the entry we are setting up for submission
 		 * without taking any lock and/or memory barrier.
 		 */
@@ -2356,4 +2388,3 @@ int pblk_alloc_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 
 	return 0;
 }
-

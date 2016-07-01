@@ -28,20 +28,6 @@ static const struct block_device_operations pblk_fops = {
 	.owner		= THIS_MODULE,
 };
 
-#ifdef CONFIG_NVM_DEBUG
-static inline u64 pblk_current_pg(struct pblk *pblk, struct pblk_block *rblk)
-{
-	int next_free_page;
-
-	spin_lock(&rblk->lock);
-	next_free_page = find_first_zero_bit(rblk->sector_bitmap,
-							pblk->nr_blk_dsecs);
-	spin_unlock(&rblk->lock);
-
-	return next_free_page;
-}
-#endif
-
 static int pblk_submit_io_checks(struct pblk *pblk, struct bio *bio)
 {
 	int bio_size = bio_sectors(bio) << 9;
@@ -439,7 +425,6 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 
 		pblk->total_blocks += dev->blks_per_lun;
 		pblk->nr_secs += dev->sec_per_lun;
-
 	}
 
 	return 0;
@@ -609,13 +594,28 @@ err:
 	return -ENOMEM;
 }
 
-#ifdef CONFIG_NVM_DEBUG
-static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *buf)
+static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *page)
 {
 	ssize_t offset;
 
-	offset = scnprintf(buf, PAGE_SIZE,
-			"%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
+	spin_lock_irq(&pblk->pblk_lock);
+	offset = sprintf(page, "read_failed=%lu, read_failed_gc=%lu, write_failed=%lu, erase_failed=%lu\n",
+				pblk->read_failed, pblk->read_failed_gc,
+				pblk->write_failed, pblk->erase_failed);
+	spin_unlock_irq(&pblk->pblk_lock);
+
+	return offset;
+}
+
+static ssize_t pblk_sysfs_inflight_writes(struct pblk *pblk, char *buf)
+{
+	return sprintf(buf, "%u\n", atomic_read(&pblk->write_inflight));
+}
+
+#ifdef CONFIG_NVM_DEBUG
+static ssize_t pblk_sysfs_stats_debug(struct pblk *pblk, char *page)
+{
+	return sprintf(page, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
 			atomic_read(&pblk->inflight_writes),
 			atomic_read(&pblk->inflight_reads),
 			atomic_read(&pblk->req_writes),
@@ -628,8 +628,6 @@ static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *buf)
 			atomic_read(&pblk->recov_gc_writes),
 			atomic_read(&pblk->requeued_writes),
 			atomic_read(&pblk->sync_reads));
-
-	return offset;
 }
 
 static ssize_t pblk_sysfs_open_blks(struct pblk *pblk, char *buf)
@@ -695,38 +693,7 @@ static ssize_t pblk_sysfs_write_buffer(struct pblk *pblk, char *buf)
 {
 	return pblk_rb_sysfs(&pblk->rwb, buf);
 }
-
-#else
-static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *buf)
-{
-	return 0;
-}
-
-static ssize_t pblk_sysfs_open_blks(struct pblk *pblk, char *buf)
-{
-	return 0;
-}
-
-static ssize_t pblk_sysfs_bad_blks(struct pblk *pblk, char *buf)
-{
-	return 0;
-}
-
-static ssize_t pblk_sysfs_write_buffer(struct pblk *pblk, char *buf)
-{
-	return 0;
-}
 #endif
-
-static ssize_t pblk_sysfs_inflight_writes(struct pblk *pblk, char *buf)
-{
-	ssize_t offset;
-
-	offset = scnprintf(buf, PAGE_SIZE,
-			"%u\n", atomic_read(&pblk->write_inflight));
-
-	return offset;
-}
 
 static struct attribute sys_stats_attr = {
 	.name = "stats",
@@ -735,6 +702,12 @@ static struct attribute sys_stats_attr = {
 
 static struct attribute sys_inflight_writes_attr = {
 	.name = "inflight_writes",
+	.mode = S_IRUGO
+};
+
+#ifdef CONFIG_NVM_DEBUG
+static struct attribute sys_stats_debug_attr = {
+	.name = "stats_debug",
 	.mode = S_IRUGO
 };
 
@@ -752,13 +725,17 @@ static struct attribute sys_rb_attr = {
 	.name = "write_buffer",
 	.mode = S_IRUGO
 };
+#endif
 
 static struct attribute *pblk_attrs[] = {
 	&sys_stats_attr,
 	&sys_inflight_writes_attr,
+#ifdef CONFIG_NVM_DEBUG
+	&sys_stats_debug_attr,
 	&sys_open_blocks_attr,
 	&sys_bad_blocks_attr,
 	&sys_rb_attr,
+#endif
 	NULL,
 };
 
@@ -773,15 +750,18 @@ static ssize_t pblk_sysfs_show(struct nvm_target *t, struct attribute *attr,
 
 	if (strcmp(attr->name, "stats") == 0)
 		return pblk_sysfs_stats(pblk, buf);
-	if (strcmp(attr->name, "inflight_writes") == 0)
+#ifdef CONFIG_NVM_DEBUG
+	else if (strcmp(attr->name, "stats_debug") == 0)
+		return pblk_sysfs_stats_debug(pblk, buf);
+	else if (strcmp(attr->name, "inflight_writes") == 0)
 		return pblk_sysfs_inflight_writes(pblk, buf);
-	if (strcmp(attr->name, "open") == 0)
+	else if (strcmp(attr->name, "open") == 0)
 		return pblk_sysfs_open_blks(pblk, buf);
-	if (strcmp(attr->name, "bad") == 0)
+	else if (strcmp(attr->name, "bad") == 0)
 		return pblk_sysfs_bad_blks(pblk, buf);
-	if (strcmp(attr->name, "write_buffer") == 0)
+	else if (strcmp(attr->name, "write_buffer") == 0)
 		return pblk_sysfs_write_buffer(pblk, buf);
-
+#endif
 	return 0;
 }
 
@@ -846,6 +826,7 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	bio_list_init(&pblk->requeue_bios);
 	spin_lock_init(&pblk->bio_lock);
 	spin_lock_init(&pblk->trans_lock);
+	spin_lock_init(&pblk->pblk_lock);
 	INIT_WORK(&pblk->ws_requeue, pblk_requeue);
 	INIT_WORK(&pblk->ws_gc, pblk_gc);
 	INIT_WORK(&pblk->ws_prov, pblk_block_pool_provision);

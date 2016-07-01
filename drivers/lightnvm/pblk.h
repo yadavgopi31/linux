@@ -362,6 +362,12 @@ struct pblk {
 	atomic_t requeued_writes;	/* Sectors requeued in cache */
 #endif
 
+	spinlock_t pblk_lock;
+	unsigned long read_failed;
+	unsigned long read_failed_gc;
+	unsigned long write_failed;
+	unsigned long erase_failed;
+
 	spinlock_t bio_lock;
 	spinlock_t trans_lock;
 	struct bio_list requeue_bios;
@@ -553,32 +559,7 @@ int pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun);
 ssize_t pblk_rb_sysfs(struct pblk_rb *rb, char *buf);
 #endif
 
-static inline void pblk_print_failed_bio(struct nvm_rq *rqd, int nr_ppas)
-{
-	if (nr_ppas > 1) {
-		int bit = -1;
-
-		while ((bit = find_next_bit((void *)&rqd->ppa_status, nr_ppas,
-							bit + 1)) < nr_ppas) {
-			pr_err("\tbit:%d: ch:%d,pl:%d,lun:%d,blk:%d,pg:%d,sec:%d\n",
-					bit,
-					rqd->ppa_list[bit].g.ch,
-					rqd->ppa_list[bit].g.pl,
-					rqd->ppa_list[bit].g.lun,
-					rqd->ppa_list[bit].g.blk,
-					rqd->ppa_list[bit].g.pg,
-					rqd->ppa_list[bit].g.sec);
-		}
-	} else {
-		pr_err("\tsingle: ch:%d,pl:%d,lun:%d,blk:%d,pg:%d, sec:%d\n",
-					rqd->ppa_addr.g.ch,
-					rqd->ppa_addr.g.pl,
-					rqd->ppa_addr.g.lun,
-					rqd->ppa_addr.g.blk,
-					rqd->ppa_addr.g.pg,
-					rqd->ppa_addr.g.sec);
-	}
-}
+void pblk_print_failed_rqd(struct nvm_rq *rqd, int error);
 
 static inline int nvm_addr_get_read_cache(struct ppa_addr gp)
 {

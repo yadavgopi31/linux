@@ -115,9 +115,10 @@ static int pblk_gc_read_victim_blk(struct pblk *pblk, u64 *lba_list,
 	pblk_free_gc_rqd(pblk, rqd);
 
 	if (bio->bi_error) {
-		pr_err("pblk: GC sync read failed (%u)\n",
-							bio->bi_error);
-		pblk_print_failed_bio(rqd, rqd->nr_ppas);
+		spin_lock_irq(&pblk->pblk_lock);
+		pblk->read_failed_gc++;
+		spin_unlock_irq(&pblk->pblk_lock);
+		pblk_print_failed_rqd(rqd, bio->bi_error);
 	}
 
 #ifdef CONFIG_NVM_DEBUG
