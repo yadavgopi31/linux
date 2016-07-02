@@ -556,6 +556,7 @@ void pblk_gc(struct work_struct *work);
 int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
 			    u64 *lba_list, unsigned int nr_entries);
 int pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun);
+void pblk_gc_kick(struct pblk *pblk);
 
 #ifdef CONFIG_NVM_DEBUG
 ssize_t pblk_rb_sysfs(struct pblk_rb *rb, char *buf);

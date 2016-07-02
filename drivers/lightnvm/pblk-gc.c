@@ -480,6 +480,7 @@ int pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun)
 	if (!lun_emergency_gc && emergency_thres) {
 		pblk_emergency_gc_on(pblk, lun->id);
 		spin_unlock(&lun->lock);
+		pblk_gc_kick(pblk);
 		return 1;
 	}
 
@@ -490,7 +491,7 @@ int pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun)
 /*
  * timed GC every interval.
  */
-static void pblk_gc_kick(struct pblk *pblk)
+void pblk_gc_kick(struct pblk *pblk)
 {
 	queue_work(pblk->krqd_wq, &pblk->ws_gc);
 }
