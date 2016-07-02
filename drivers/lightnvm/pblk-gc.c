@@ -386,7 +386,7 @@ static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
 	struct nvm_lun *lun = rlun->parent;
 	struct pblk_block_ws *blk_ws;
 	struct pblk_block *rblk, *trblk;
-	unsigned int nr_blocks_need;
+	unsigned int nr_free_blocks, nr_blocks_need;
 	int emergency_gc;
 	int emergency_thres;
 	LIST_HEAD(gc_list);
@@ -396,21 +396,22 @@ static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
 	if (nr_blocks_need < pblk->nr_luns)
 		nr_blocks_need = pblk->nr_luns;
 
-	spin_lock(&rlun->lock);
+	spin_lock(&lun->lock);
 	emergency_gc = pblk_is_emergency_gc(pblk, lun->id);
-
-	while (nr_blocks_need > lun->nr_free_blocks &&
+	nr_free_blocks = lun->nr_free_blocks;
+	while (nr_blocks_need > nr_free_blocks &&
 					!list_empty(&rlun->prio_list)) {
 		rblk = block_prio_find_max(rlun);
 		if (!rblk->nr_invalid_secs)
 			goto start_gc;
 
+		nr_free_blocks++;
 		list_move_tail(&rblk->prio, &gc_list);
 	}
 
 start_gc:
-	emergency_thres = lun->nr_free_blocks < pblk->gc_ths.emergency;
-	spin_unlock(&rlun->lock);
+	emergency_thres = nr_free_blocks < pblk->gc_ths.emergency;
+	spin_unlock(&lun->lock);
 
 	list_for_each_entry_safe(rblk, trblk, &gc_list, prio) {
 		blk_ws = mempool_alloc(pblk->blk_ws_pool, GFP_ATOMIC);
@@ -435,9 +436,9 @@ start_gc:
 	/* Exit emergency GC when above the GC threshold */
 	if (unlikely(emergency_gc) && !emergency_thres) {
 		pr_err("pblk: exit emergency GC. Lun:%d\n", lun->id);
-		spin_lock(&rlun->lock);
+		spin_lock(&lun->lock);
 		pblk_emergency_gc_off(pblk, lun->id);
-		spin_unlock(&rlun->lock);
+		spin_unlock(&lun->lock);
 	}
 
 	if (unlikely(!list_empty(&rlun->bb_list)))
@@ -462,6 +463,7 @@ int pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun)
 	int emergency_thres;
 	int lun_emergency_gc;
 
+	spin_lock(&lun->lock);
 	lun_emergency_gc = pblk_is_emergency_gc(pblk, lun->id);
 	emergency_thres = lun->nr_free_blocks < pblk->gc_ths.emergency;
 
@@ -476,12 +478,12 @@ int pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun)
 	 */
 	if (!lun_emergency_gc && emergency_thres) {
 		pr_err("pblk: enter emergency GC. Lun:%d\n", lun->id);
-		spin_lock(&rlun->lock);
 		pblk_emergency_gc_on(pblk, lun->id);
-		spin_unlock(&rlun->lock);
+		spin_unlock(&lun->lock);
 		return 1;
 	}
 
+	spin_unlock(&lun->lock);
 	return 0;
 }
 
