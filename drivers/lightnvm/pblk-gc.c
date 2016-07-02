@@ -313,9 +313,10 @@ static void pblk_block_gc(struct work_struct *work)
 	u64 *lba_list;
 	u64 gc_lba_list[PBLK_MAX_REQ_ADDRS];
 	unsigned int page_size = dev->sec_per_pl * dev->sec_size;
+	int nr_valid_secs = pblk->nr_blk_dsecs - rblk->nr_invalid_secs;
+	int moved, total_moved = 0;
 	int bit;
 	int nr_ppas;
-	int moved, total_moved = 0;
 
 	mempool_free(blk_ws, pblk->blk_ws_pool);
 	pr_debug("pblk: block '%lu' being reclaimed\n", rblk->parent->id);
@@ -337,11 +338,11 @@ static void pblk_block_gc(struct work_struct *work)
 		goto free_recov_page;
 	}
 
-	bit = 0;
+	bit = -1;
 next_lba_list:
 	nr_ppas = 0;
 	do {
-		bit = find_next_bit(rblk->invalid_bitmap,
+		bit = find_next_zero_bit(rblk->invalid_bitmap,
 						pblk->nr_blk_dsecs, bit);
 		gc_lba_list[nr_ppas] = lba_list[bit];
 
@@ -357,12 +358,12 @@ prepare_ppas:
 		pr_err("pblk: could not GC all sectors:blk:%lu, GC:%d/%d/%d\n",
 						rblk->parent->id,
 						moved, nr_ppas,
-						rblk->nr_invalid_secs);
+						nr_valid_secs);
 		goto put_back;
 	}
 
 	total_moved += moved;
-	if (total_moved < rblk->nr_invalid_secs)
+	if (total_moved < nr_valid_secs)
 		goto next_lba_list;
 
 	spin_lock(&rblk->lock);
