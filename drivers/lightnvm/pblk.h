@@ -593,6 +593,7 @@ static inline u64 nvm_addr_to_cacheline(struct ppa_addr gp)
 static inline void pblk_emergency_gc_on(struct pblk *pblk, int lun_id)
 {
 	WARN_ON(test_and_set_bit(lun_id, pblk->gc_ths.emergency_luns));
+	pr_err("pblk: enter emergency GC. Lun:%d\n", lun_id);
 	atomic_set(&pblk->user_io_rate, 1);
 }
 
@@ -601,8 +602,10 @@ static inline void pblk_emergency_gc_off(struct pblk *pblk, int lun_id)
 	WARN_ON(!test_and_clear_bit(lun_id, pblk->gc_ths.emergency_luns));
 
 	/* When no lun is in emergency GC, enable user I/O */
-	if (bitmap_empty(pblk->gc_ths.emergency_luns, pblk->dev->nr_luns))
+	if (bitmap_empty(pblk->gc_ths.emergency_luns, pblk->dev->nr_luns)) {
+		pr_err("pblk: exit emergency GC. Lun:%d\n", lun_id);
 		atomic_set(&pblk->user_io_rate, 0);
+	}
 }
 
 static inline int pblk_is_emergency_gc(struct pblk *pblk, int lun_id)

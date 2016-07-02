@@ -309,12 +309,14 @@ static void pblk_block_gc(struct work_struct *work)
 	struct nvm_dev *dev = pblk->dev;
 	struct pblk_block *rblk = blk_ws->rblk;
 	struct pblk_lun *rlun = rblk->rlun;
+	struct nvm_lun *lun = rlun->parent;
 	void *recov_page;
 	u64 *lba_list;
 	u64 gc_lba_list[PBLK_MAX_REQ_ADDRS];
 	unsigned int page_size = dev->sec_per_pl * dev->sec_size;
 	int nr_valid_secs = pblk->nr_blk_dsecs - rblk->nr_invalid_secs;
 	int moved, total_moved = 0;
+	int emergency_gc, emergency_thres;
 	int bit;
 	int nr_ppas;
 
@@ -370,6 +372,15 @@ prepare_ppas:
 	pblk_put_blk(pblk, rblk);
 	spin_unlock(&rblk->lock);
 
+	spin_lock(&lun->lock);
+	emergency_gc = pblk_is_emergency_gc(pblk, lun->id);
+	emergency_thres = lun->nr_free_blocks < pblk->gc_ths.emergency;
+
+	/* Exit emergency GC when above the GC threshold */
+	if (unlikely(emergency_gc) && !emergency_thres)
+		pblk_emergency_gc_off(pblk, lun->id);
+	spin_unlock(&lun->lock);
+
 	kfree(recov_page);
 	return;
 
@@ -388,7 +399,6 @@ static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
 	struct pblk_block *rblk, *trblk;
 	unsigned int nr_free_blocks, nr_blocks_need;
 	int emergency_gc;
-	int emergency_thres;
 	LIST_HEAD(gc_list);
 
 	nr_blocks_need = pblk->dev->blks_per_lun / GC_LIMIT_INVERSE;
@@ -410,7 +420,6 @@ static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
 	}
 
 start_gc:
-	emergency_thres = nr_free_blocks < pblk->gc_ths.emergency;
 	spin_unlock(&lun->lock);
 
 	list_for_each_entry_safe(rblk, trblk, &gc_list, prio) {
@@ -431,14 +440,6 @@ start_gc:
 		queue_work(pblk->kgc_wq, &blk_ws->ws_blk);
 
 		nr_blocks_need--;
-	}
-
-	/* Exit emergency GC when above the GC threshold */
-	if (unlikely(emergency_gc) && !emergency_thres) {
-		pr_err("pblk: exit emergency GC. Lun:%d\n", lun->id);
-		spin_lock(&lun->lock);
-		pblk_emergency_gc_off(pblk, lun->id);
-		spin_unlock(&lun->lock);
 	}
 
 	if (unlikely(!list_empty(&rlun->bb_list)))
@@ -477,7 +478,6 @@ int pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun)
 	 * order to free blocks
 	 */
 	if (!lun_emergency_gc && emergency_thres) {
-		pr_err("pblk: enter emergency GC. Lun:%d\n", lun->id);
 		pblk_emergency_gc_on(pblk, lun->id);
 		spin_unlock(&lun->lock);
 		return 1;
