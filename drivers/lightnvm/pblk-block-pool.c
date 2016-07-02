@@ -39,10 +39,8 @@ provision:
 		rlun = &pblk->luns[bit];
 		queue = &blk_pool->queues[bit];
 
-		if (pblk_enable_emergengy_gc(pblk, rlun)) {
+		if (pblk_enable_emergengy_gc(pblk, rlun))
 			gen_emergency_gc = 1;
-			continue;
-		}
 
 		rblk = pblk_get_blk(pblk, rlun, gen_emergency_gc);
 		if (!rblk) {
