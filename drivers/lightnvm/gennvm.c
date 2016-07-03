@@ -360,6 +360,7 @@ static int gen_block_bb(struct gen_dev *gn, struct ppa_addr ppa,
 
 		blk = &lun->vlun.blocks[i];
 		list_move_tail(&blk->list, &lun->bb_list);
+		blk->state = NVM_BLK_ST_BAD;
 		lun->vlun.nr_free_blocks--;
 	}
 
@@ -405,13 +406,21 @@ static int gen_block_map(u64 slba, u32 nlb, __le64 *entries, void *private)
 		blk = &lun->vlun.blocks[div_u64(pba, dev->sec_per_blk)];
 
 		if (!blk->state) {
+			struct nvm_block *tblk;
+
 			/* at this point, we don't know anything about the
 			 * block. It's up to the FTL on top to re-etablish the
 			 * block state. The block is assumed to be open.
 			 */
 			list_move_tail(&blk->list, &lun->used_list);
 			blk->state = NVM_BLK_ST_TGT;
-			lun->vlun.nr_free_blocks--;
+
+			list_for_each_entry(tblk, &lun->free_list, list) {
+				if (blk->id == tblk->id) {
+					lun->vlun.nr_free_blocks--;
+					break;
+				}
+			}
 		}
 	}
 
@@ -467,7 +476,7 @@ static int gen_blocks_init(struct nvm_dev *dev, struct gen_dev *gn)
 		}
 	}
 
-	if ((dev->identity.dom & NVM_RSP_L2P) && dev->ops->get_l2p_tbl) {
+	if (dev->identity.dom & NVM_RSP_L2P && dev->ops->get_l2p_tbl) {
 		ret = dev->ops->get_l2p_tbl(dev, 0, dev->total_secs,
 							gen_block_map, dev);
 		if (ret) {
