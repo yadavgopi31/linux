@@ -316,7 +316,7 @@ static void pblk_block_gc(struct work_struct *work)
 	unsigned int page_size = dev->sec_per_pl * dev->sec_size;
 	int nr_valid_secs = pblk->nr_blk_dsecs - rblk->nr_invalid_secs;
 	int moved, total_moved = 0;
-	int emergency_gc, emergency_thres;
+	int emergency_gc, emergency_th;
 	int bit;
 	int nr_ppas;
 
@@ -374,12 +374,12 @@ prepare_ppas:
 
 	spin_lock(&lun->lock);
 	emergency_gc = pblk_is_emergency_gc(pblk, lun->id);
-	emergency_thres = lun->nr_free_blocks < pblk->gc_ths.emergency;
-
-	/* Exit emergency GC when above the GC threshold */
-	if (unlikely(emergency_gc) && !emergency_thres)
-		pblk_emergency_gc_off(pblk, lun->id);
+	emergency_th = pblk_gc_lun_is_emer(pblk, lun);
 	spin_unlock(&lun->lock);
+
+	/* Exit emergency GC on lun when above the GC threshold */
+	if (unlikely(emergency_gc) && !emergency_th)
+		pblk_emergency_gc_off(pblk, lun->id);
 
 	kfree(recov_page);
 	return;
@@ -461,12 +461,7 @@ void pblk_gc(struct work_struct *work)
 int pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun)
 {
 	struct nvm_lun *lun = rlun->parent;
-	int emergency_thres;
-	int lun_emergency_gc;
-
-	spin_lock(&lun->lock);
-	lun_emergency_gc = pblk_is_emergency_gc(pblk, lun->id);
-	emergency_thres = lun->nr_free_blocks < pblk->gc_ths.emergency;
+	int emergency_th, emergency_gc;
 
 	/* If the number of free blocks in the LUN goes below the threshold, get
 	 * in emergency GC mode.
@@ -477,14 +472,18 @@ int pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun)
 	 * stopped and GC is the only one adding entries to the write buffer in
 	 * order to free blocks
 	 */
-	if (!lun_emergency_gc && emergency_thres) {
+
+	spin_lock(&lun->lock);
+	emergency_gc = pblk_is_emergency_gc(pblk, lun->id);
+	emergency_th = pblk_gc_lun_is_emer(pblk, lun);
+	spin_unlock(&lun->lock);
+
+	if (!emergency_gc && emergency_th) {
 		pblk_emergency_gc_on(pblk, lun->id);
-		spin_unlock(&lun->lock);
 		pblk_gc_kick(pblk);
 		return 1;
 	}
 
-	spin_unlock(&lun->lock);
 	return 0;
 }
 
@@ -513,11 +512,34 @@ int pblk_gc_init(struct pblk *pblk)
 
 	pblk->kgc_wq = alloc_workqueue("pblk-bg", WQ_MEM_RECLAIM, 1);
 	if (!pblk->kgc_wq)
-		return -ENOMEM;
+		goto fail_destrow_krqd_qw;
+
+	/* The write buffer has space for one block per active LUN on the
+	 * target. In emergency GC we need to be able to flush the whole buffer,
+	 * which in the worst case is full with user I/O. We leave 2 extra
+	 * blocks for emergency GC.
+	 *
+	 * JAVIER: Calculate this properly
+	 */
+	pblk->gc_ths.emergency_luns = kzalloc(BITS_TO_LONGS(pblk->dev->nr_luns) *
+					sizeof(unsigned long), GFP_KERNEL);
+	if (!pblk->gc_ths.emergency_luns)
+		goto fail_destrow_kgc_qw;
+
+	spin_lock_init(&pblk->gc_ths.lock);
+
+	pblk->gc_ths.emergency = 4;
+	pblk->gc_ths.user_io_rate = 0;
 
 	setup_timer(&pblk->gc_timer, pblk_gc_timer, (unsigned long)pblk);
 
 	return 0;
+
+fail_destrow_kgc_qw:
+	destroy_workqueue(pblk->kgc_wq);
+fail_destrow_krqd_qw:
+	destroy_workqueue(pblk->krqd_wq);
+	return -ENOMEM;
 }
 
 void pblk_gc_exit(struct pblk *pblk)
@@ -530,5 +552,7 @@ void pblk_gc_exit(struct pblk *pblk)
 
 	if (pblk->kgc_wq)
 		destroy_workqueue(pblk->kgc_wq);
+
+	kfree(pblk->gc_ths.emergency_luns);
 }
 

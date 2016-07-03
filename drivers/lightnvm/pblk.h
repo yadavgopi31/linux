@@ -275,10 +275,15 @@ struct pblk_lun {
 
 /* Calculated values for GC thresholding. These are used to regulate user I/O
  * based on disk utilization and the necessity of GC
+ *
+ * TODO: user_io_rate should be used by the rate limiter to control the flow of
+ * incoming user I/Os.
  */
 struct pblk_gc_thresholds {
 	unsigned long *emergency_luns;
 	unsigned int emergency;
+	int user_io_rate;
+	spinlock_t lock;
 };
 
 struct pblk_prov_queue {
@@ -329,18 +334,6 @@ struct pblk {
 
 	unsigned int nr_blk_dsecs; /* Number of data sectors in block */
 	unsigned int blk_meta_size;
-
-	struct pblk_gc_thresholds gc_ths;
-
-	/* TODO: This value should be used by the rate limiter to control the
-	 * flow of incoming user I/Os.
-	 *
-	 * For now:
-	 *	- 1: accept user I/O
-	 *	- 0: reject user I/O
-	 *
-	 */
-	atomic_t user_io_rate;
 
 	/* Write strategy variables. Move these into each for structure for each
 	 * strategy
@@ -403,6 +396,7 @@ struct pblk {
 	struct timer_list wtimer;
 
 	struct pblk_blk_pool blk_pool;
+	struct pblk_gc_thresholds gc_ths;
 };
 
 struct pblk_block_ws {
@@ -593,30 +587,62 @@ static inline u64 nvm_addr_to_cacheline(struct ppa_addr gp)
 
 static inline void pblk_emergency_gc_on(struct pblk *pblk, int lun_id)
 {
-	WARN_ON(test_and_set_bit(lun_id, pblk->gc_ths.emergency_luns));
-	pr_err("pblk: enter emergency GC. Lun:%d\n", lun_id);
-	atomic_set(&pblk->user_io_rate, 1);
+	struct pblk_gc_thresholds *th = &pblk->gc_ths;
+
+	spin_lock(&th->lock);
+	set_bit(lun_id, th->emergency_luns);
+	th->user_io_rate = 1;
+
+	pr_debug("pblk: enter emergency GC. Lun:%d\n", lun_id);
+	spin_unlock(&th->lock);
 }
 
 static inline void pblk_emergency_gc_off(struct pblk *pblk, int lun_id)
 {
-	WARN_ON(!test_and_clear_bit(lun_id, pblk->gc_ths.emergency_luns));
+	struct pblk_gc_thresholds *th = &pblk->gc_ths;
 
-	/* When no lun is in emergency GC, enable user I/O */
-	if (bitmap_empty(pblk->gc_ths.emergency_luns, pblk->dev->nr_luns)) {
-		pr_err("pblk: exit emergency GC. Lun:%d\n", lun_id);
-		atomic_set(&pblk->user_io_rate, 0);
+	spin_lock(&th->lock);
+	clear_bit(lun_id, th->emergency_luns);
+
+	if (bitmap_empty(th->emergency_luns, pblk->nr_luns)) {
+		pr_debug("pblk: exit emergency GC\n");
+		th->user_io_rate = 0;
 	}
+	spin_unlock(&th->lock);
 }
 
 static inline int pblk_is_emergency_gc(struct pblk *pblk, int lun_id)
 {
-	return test_bit(lun_id, pblk->gc_ths.emergency_luns);
+	struct pblk_gc_thresholds *th = &pblk->gc_ths;
+	int ret;
+
+	spin_lock(&th->lock);
+	ret = test_bit(lun_id, th->emergency_luns);
+	spin_unlock(&th->lock);
+
+	return ret;
+}
+
+static inline int pblk_gc_lun_is_emer(struct pblk *pblk, struct nvm_lun *lun)
+{
+	struct pblk_gc_thresholds *th = &pblk->gc_ths;
+
+#ifdef CONFIG_NVM_DEBUG
+	lockdep_assert_held(&lun->lock);
+#endif
+	return (lun->nr_free_blocks < th->emergency);
 }
 
 static inline int pblk_emergency_gc_mode(struct pblk *pblk)
 {
-	return atomic_read(&pblk->user_io_rate);
+	struct pblk_gc_thresholds *th = &pblk->gc_ths;
+	int ret;
+
+	spin_lock(&th->lock);
+	ret = th->user_io_rate;
+	spin_unlock(&th->lock);
+
+	return ret;
 }
 
 static inline int ppa_cmp_blk(struct ppa_addr ppa1, struct ppa_addr ppa2)

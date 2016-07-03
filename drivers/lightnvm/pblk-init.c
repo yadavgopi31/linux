@@ -261,29 +261,13 @@ static int pblk_core_init(struct pblk *pblk)
 	if (!pblk->kw_wq)
 		goto free_blk_meta_pool;
 
-	/* The write buffer has space for one block per active LUN on the
-	 * target. In emergency GC we need to be able to flush the whole buffer,
-	 * which in the worst case is full with user I/O. We leave 2 extra
-	 * blocks for emergency GC.
-	 */
-	pblk->gc_ths.emergency_luns =
-			kzalloc(BITS_TO_LONGS(pblk->dev->nr_luns) *
-					sizeof(unsigned long), GFP_KERNEL);
-	if (!pblk->gc_ths.emergency_luns)
-		goto free_kw_wq;
-
-	pblk->gc_ths.emergency = 4;
-	atomic_set(&pblk->user_io_rate, 0);
-
 	/* Init write buffer */
 	if (pblk_rwb_init(pblk))
-		goto free_emergency_blocks;
+		goto free_kw_wq;
 
 	INIT_LIST_HEAD(&pblk->compl_list);
 	return 0;
 
-free_emergency_blocks:
-	kfree(pblk->gc_ths.emergency_luns);
 free_kw_wq:
 	destroy_workqueue(pblk->kw_wq);
 free_blk_meta_pool:
@@ -305,8 +289,6 @@ static void pblk_core_free(struct pblk *pblk)
 {
 	if (pblk->kw_wq)
 		destroy_workqueue(pblk->kw_wq);
-
-	kfree(pblk->gc_ths.emergency_luns);
 
 	mempool_destroy(pblk->page_pool);
 	mempool_destroy(pblk->blk_ws_pool);
