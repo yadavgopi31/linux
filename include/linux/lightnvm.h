@@ -488,8 +488,7 @@ typedef void (nvmm_unregister_fn)(struct nvm_dev *);
 
 typedef int (nvmm_create_tgt_fn)(struct nvm_dev *, struct nvm_ioctl_create *);
 typedef int (nvmm_remove_tgt_fn)(struct nvm_dev *, struct nvm_ioctl_remove *);
-typedef struct nvm_block *(nvmm_get_blk_fn)(struct nvm_dev *,
-					      struct nvm_lun *, unsigned long);
+typedef struct nvm_block *(nvmm_get_blk_fn)(struct nvm_dev *, struct nvm_lun *);
 typedef void (nvmm_put_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvmm_open_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvmm_close_blk_fn)(struct nvm_dev *, struct nvm_block *);
@@ -517,6 +516,7 @@ struct nvmm_type {
 
 	/* Block administration callbacks */
 	nvmm_get_blk_fn *get_blk;
+	nvmm_get_blk_fn *get_blk_unlocked;
 	nvmm_put_blk_fn *put_blk;
 	nvmm_open_blk_fn *open_blk;
 	nvmm_close_blk_fn *close_blk;
@@ -545,8 +545,9 @@ struct nvmm_type {
 extern int nvm_register_mgr(struct nvmm_type *);
 extern void nvm_unregister_mgr(struct nvmm_type *);
 
-extern struct nvm_block *nvm_get_blk(struct nvm_dev *, struct nvm_lun *,
-								unsigned long);
+extern struct nvm_block *nvm_get_blk(struct nvm_dev *, struct nvm_lun *);
+extern struct nvm_block *nvm_get_blk_unlocked(struct nvm_dev *,
+					      struct nvm_lun *);
 extern void nvm_put_blk(struct nvm_dev *, struct nvm_block *);
 
 extern struct nvm_dev *nvm_alloc_dev(int);
