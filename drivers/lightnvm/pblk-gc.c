@@ -141,24 +141,25 @@ fail:
 /*
  * Emergency GC
  */
-static void pblk_gc_emergency_on(struct pblk *pblk, int lun_id)
+static void pblk_gc_emergency_on(struct pblk *pblk, int pos)
 {
 	struct pblk_gc_thresholds *th = &pblk->gc_ths;
 
 	spin_lock(&th->lock);
-	set_bit(lun_id, th->emergency_luns);
+	set_bit(pos, th->emergency_luns);
 	th->user_io_rate = 1;
 
-	pr_debug("pblk: enter emergency GC. Lun:%d\n", lun_id);
+	pr_debug("pblk: enter emergency GC. Lun:%d\n",
+						pblk->luns[pos].parent->id);
 	spin_unlock(&th->lock);
 }
 
-static void pblk_gc_emergency_off(struct pblk *pblk, int lun_id)
+static void pblk_gc_emergency_off(struct pblk *pblk, int pos)
 {
 	struct pblk_gc_thresholds *th = &pblk->gc_ths;
 
 	spin_lock(&th->lock);
-	clear_bit(lun_id, th->emergency_luns);
+	clear_bit(pos, th->emergency_luns);
 
 	if (bitmap_empty(th->emergency_luns, pblk->nr_luns)) {
 		pr_debug("pblk: exit emergency GC\n");
@@ -167,13 +168,13 @@ static void pblk_gc_emergency_off(struct pblk *pblk, int lun_id)
 	spin_unlock(&th->lock);
 }
 
-static int pblk_gc_is_emergency(struct pblk *pblk, int lun_id)
+static int pblk_gc_is_emergency(struct pblk *pblk, int pos)
 {
 	struct pblk_gc_thresholds *th = &pblk->gc_ths;
 	int ret;
 
 	spin_lock(&th->lock);
-	ret = test_bit(lun_id, th->emergency_luns);
+	ret = test_bit(pos, th->emergency_luns);
 	spin_unlock(&th->lock);
 
 	return ret;
@@ -216,12 +217,12 @@ void pblk_gc_check_emergency_in(struct pblk *pblk, struct pblk_lun *rlun)
 	 * order to free blocks
 	 */
 	spin_lock(&lun->lock);
-	emergency_gc = pblk_gc_is_emergency(pblk, lun->id);
+	emergency_gc = pblk_gc_is_emergency(pblk, rlun->prov_pos);
 	emergency_th = pblk_gc_lun_is_emer(pblk, lun);
 	spin_unlock(&lun->lock);
 
 	if (!emergency_gc && emergency_th) {
-		pblk_gc_emergency_on(pblk, lun->id);
+		pblk_gc_emergency_on(pblk, rlun->prov_pos);
 		pblk_gc_kick(pblk);
 	}
 }
@@ -232,12 +233,12 @@ void pblk_gc_check_emergency_out(struct pblk *pblk, struct pblk_lun *rlun)
 	int emergency_th, emergency_gc;
 
 	spin_lock(&lun->lock);
-	emergency_gc = pblk_gc_is_emergency(pblk, lun->id);
+	emergency_gc = pblk_gc_is_emergency(pblk, rlun->prov_pos);
 	emergency_th = pblk_gc_lun_is_emer(pblk, lun);
 	spin_unlock(&lun->lock);
 
 	if (unlikely(emergency_gc) && !emergency_th)
-		pblk_gc_emergency_off(pblk, lun->id);
+		pblk_gc_emergency_off(pblk, rlun->prov_pos);
 }
 
 /*
@@ -504,7 +505,7 @@ static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
 		nr_blocks_need = pblk->nr_luns;
 
 	spin_lock(&lun->lock);
-	emergency_gc = pblk_gc_is_emergency(pblk, lun->id);
+	emergency_gc = pblk_gc_is_emergency(pblk, rlun->prov_pos);
 	nr_free_blocks = lun->nr_free_blocks;
 	while (nr_blocks_need > nr_free_blocks &&
 					!list_empty(&rlun->prio_list)) {
