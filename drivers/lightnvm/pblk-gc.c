@@ -168,7 +168,7 @@ static void pblk_gc_emergency_off(struct pblk *pblk, int pos)
 	spin_unlock(&th->lock);
 }
 
-static int pblk_gc_is_emergency(struct pblk *pblk, int pos)
+static int pblk_gc_lun_is_emergency(struct pblk *pblk, int pos)
 {
 	struct pblk_gc_thresholds *th = &pblk->gc_ths;
 	int ret;
@@ -190,7 +190,7 @@ static int pblk_gc_lun_is_emer(struct pblk *pblk, struct nvm_lun *lun)
 	return (lun->nr_free_blocks < th->emergency);
 }
 
-int pblk_gc_mode(struct pblk *pblk)
+int pblk_gc_is_emergency(struct pblk *pblk)
 {
 	struct pblk_gc_thresholds *th = &pblk->gc_ths;
 	int ret;
@@ -217,7 +217,7 @@ void pblk_gc_check_emergency_in(struct pblk *pblk, struct pblk_lun *rlun)
 	 * order to free blocks
 	 */
 	spin_lock(&lun->lock);
-	emergency_gc = pblk_gc_is_emergency(pblk, rlun->prov_pos);
+	emergency_gc = pblk_gc_lun_is_emergency(pblk, rlun->prov_pos);
 	emergency_th = pblk_gc_lun_is_emer(pblk, lun);
 	spin_unlock(&lun->lock);
 
@@ -233,7 +233,7 @@ void pblk_gc_check_emergency_out(struct pblk *pblk, struct pblk_lun *rlun)
 	int emergency_th, emergency_gc;
 
 	spin_lock(&lun->lock);
-	emergency_gc = pblk_gc_is_emergency(pblk, rlun->prov_pos);
+	emergency_gc = pblk_gc_lun_is_emergency(pblk, rlun->prov_pos);
 	emergency_th = pblk_gc_lun_is_emer(pblk, lun);
 	spin_unlock(&lun->lock);
 
@@ -505,7 +505,7 @@ static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)
 		nr_blocks_need = pblk->nr_luns;
 
 	spin_lock(&lun->lock);
-	emergency_gc = pblk_gc_is_emergency(pblk, rlun->prov_pos);
+	emergency_gc = pblk_gc_lun_is_emergency(pblk, rlun->prov_pos);
 	nr_free_blocks = lun->nr_free_blocks;
 	while (nr_blocks_need > nr_free_blocks &&
 					!list_empty(&rlun->prio_list)) {

@@ -949,7 +949,7 @@ int pblk_buffer_write(struct pblk *pblk, struct bio *bio, unsigned long flags)
 	}
 
 retry:
-	if (unlikely(pblk_gc_mode(pblk)))
+	if (unlikely(pblk_gc_is_emergency(pblk)))
 		return NVM_IO_REQUEUE;
 
 	ret = pblk_write_to_cache(pblk, bio, flags, nr_secs);
@@ -2064,7 +2064,7 @@ static int pblk_map_rr_page(struct pblk *pblk, unsigned int sentry,
 	int gen_emergency_gc;
 	int ret = 0;
 
-	gen_emergency_gc = pblk_gc_mode(pblk);
+	gen_emergency_gc = pblk_gc_is_emergency(pblk);
 	rlun = pblk_get_lun_rr(pblk, gen_emergency_gc);
 
 try_lun:

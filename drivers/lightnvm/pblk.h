@@ -552,7 +552,7 @@ int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
 			    u64 *lba_list, unsigned int nr_entries);
 void pblk_gc_check_emergency_in(struct pblk *pblk, struct pblk_lun *rlun);
 void pblk_gc_check_emergency_out(struct pblk *pblk, struct pblk_lun *rlun);
-int pblk_gc_mode(struct pblk *pblk);
+int pblk_gc_is_emergency(struct pblk *pblk);
 void pblk_gc_kick(struct pblk *pblk);
 
 #ifdef CONFIG_NVM_DEBUG
