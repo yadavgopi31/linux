@@ -150,24 +150,19 @@ int pblk_blk_pool_init(struct pblk *pblk)
 	 * increased if having pressure on the write thread
 	 */
 	blk_pool->nr_luns = pblk->nr_luns;
-	blk_pool->qd = 3;
+	blk_pool->qd = 2;
 
 	blk_pool->queues = kmalloc(sizeof(struct pblk_prov_queue) *
 					blk_pool->nr_luns, GFP_KERNEL);
-	if (!blk_pool->queues) {
-		destroy_workqueue(blk_pool->wq);
-		return -ENOMEM;
-	}
+	if (!blk_pool->queues)
+		goto fail_destroy_wq;
 
 	spin_lock_init(&blk_pool->lock);
 
 	bitmap_len = BITS_TO_LONGS(blk_pool->nr_luns) * sizeof(unsigned long);
 	blk_pool->bitmap = kzalloc(bitmap_len, GFP_KERNEL);
-	if (!blk_pool->bitmap) {
-		kfree(blk_pool->queues);
-		destroy_workqueue(blk_pool->wq);
-		return -ENOMEM;
-	}
+	if (!blk_pool->bitmap)
+		goto fail_free_queues;
 
 	for (i = 0; i < blk_pool->nr_luns; i++) {
 		queue = &blk_pool->queues[i];
@@ -181,6 +176,12 @@ int pblk_blk_pool_init(struct pblk *pblk)
 	setup_timer(&blk_pool->timer, blk_pool_timer_fn, (unsigned long)pblk);
 
 	return 0;
+
+fail_free_queues:
+	kfree(blk_pool->queues);
+fail_destroy_wq:
+	destroy_workqueue(blk_pool->wq);
+	return -ENOMEM;
 }
 
 void pblk_blk_pool_free(struct pblk *pblk)

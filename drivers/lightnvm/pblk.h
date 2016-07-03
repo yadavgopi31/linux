@@ -295,9 +295,11 @@ struct pblk_prov_queue {
 struct pblk_blk_pool {
 	struct pblk_prov_queue *queues;
 	spinlock_t lock;
+
 	unsigned long *bitmap;
 	int nr_luns;
 	int qd;
+
 	struct timer_list timer;
 	struct workqueue_struct *wq;
 	struct work_struct ws;
