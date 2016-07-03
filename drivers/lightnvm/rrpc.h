@@ -79,6 +79,8 @@ struct rrpc_lun {
 
 	struct work_struct ws_gc;
 
+	int reserved_blocks;
+
 	spinlock_t lock;
 };
 

@@ -194,12 +194,22 @@ static struct rrpc_block *rrpc_get_blk(struct rrpc *rrpc, struct rrpc_lun *rlun,
 {
 	struct nvm_block *blk;
 	struct rrpc_block *rblk;
+	int is_gc = flags & NVM_IOTYPE_GC;
 
-	blk = nvm_get_blk(rrpc->dev, rlun->parent, flags);
-	if (!blk) {
-		pr_err("nvm: rrpc: cannot get new block from media manager\n");
+	spin_lock(&rlun->parent->lock);
+	if (!is_gc && rlun->parent->nr_free_blocks < rlun->reserved_blocks) {
+		pr_err("nvm: rrpc: cannot give block to non GC request\n");
+		spin_unlock(&rlun->parent->lock);
 		return NULL;
 	}
+
+	blk = nvm_get_blk_unlocked(rrpc->dev, rlun->parent);
+	if (!blk) {
+		pr_err("nvm: rrpc: cannot get new block from media manager\n");
+		spin_unlock(&rlun->parent->lock);
+		return NULL;
+	}
+	spin_unlock(&rlun->parent->lock);
 
 	rblk = rrpc_get_rblk(rlun, blk->id);
 	blk->priv = rblk;
@@ -1174,6 +1184,8 @@ static int rrpc_luns_init(struct rrpc *rrpc, int lun_begin, int lun_end)
 			INIT_LIST_HEAD(&rblk->prio);
 			spin_lock_init(&rblk->lock);
 		}
+
+		rlun->reserved_blocks = 2; /* for GC only */
 
 		rlun->rrpc = rrpc;
 		INIT_LIST_HEAD(&rlun->prio_list);

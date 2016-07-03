@@ -23,7 +23,6 @@
 struct gen_lun {
 	struct nvm_lun vlun;
 
-	int reserved_blocks;
 	/* lun block lists */
 	struct list_head used_list;	/* In-use blocks */
 	struct list_head free_list;	/* Not used blocks i.e. released
