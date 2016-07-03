@@ -36,7 +36,7 @@ provision:
 		rlun = &pblk->luns[bit];
 		queue = &blk_pool->queues[bit];
 
-		pblk_enable_emergengy_gc(pblk, rlun);
+		pblk_gc_check_emergency_in(pblk, rlun);
 
 		rblk = pblk_get_blk(pblk, rlun);
 		if (!rblk) {

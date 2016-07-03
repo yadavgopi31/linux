@@ -550,7 +550,9 @@ void pblk_gc_queue(struct work_struct *work);
 void pblk_gc(struct work_struct *work);
 int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
 			    u64 *lba_list, unsigned int nr_entries);
-void pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun);
+void pblk_gc_check_emergency_in(struct pblk *pblk, struct pblk_lun *rlun);
+void pblk_gc_check_emergency_out(struct pblk *pblk, struct pblk_lun *rlun);
+int pblk_gc_mode(struct pblk *pblk);
 void pblk_gc_kick(struct pblk *pblk);
 
 #ifdef CONFIG_NVM_DEBUG
@@ -584,66 +586,6 @@ static inline u64 nvm_addr_to_cacheline(struct ppa_addr gp)
 	BUG_ON(gp.ppa == ADDR_EMPTY);
 #endif
 	return gp.c.line;
-}
-
-static inline void pblk_emergency_gc_on(struct pblk *pblk, int lun_id)
-{
-	struct pblk_gc_thresholds *th = &pblk->gc_ths;
-
-	spin_lock(&th->lock);
-	set_bit(lun_id, th->emergency_luns);
-	th->user_io_rate = 1;
-
-	pr_debug("pblk: enter emergency GC. Lun:%d\n", lun_id);
-	spin_unlock(&th->lock);
-}
-
-static inline void pblk_emergency_gc_off(struct pblk *pblk, int lun_id)
-{
-	struct pblk_gc_thresholds *th = &pblk->gc_ths;
-
-	spin_lock(&th->lock);
-	clear_bit(lun_id, th->emergency_luns);
-
-	if (bitmap_empty(th->emergency_luns, pblk->nr_luns)) {
-		pr_debug("pblk: exit emergency GC\n");
-		th->user_io_rate = 0;
-	}
-	spin_unlock(&th->lock);
-}
-
-static inline int pblk_is_emergency_gc(struct pblk *pblk, int lun_id)
-{
-	struct pblk_gc_thresholds *th = &pblk->gc_ths;
-	int ret;
-
-	spin_lock(&th->lock);
-	ret = test_bit(lun_id, th->emergency_luns);
-	spin_unlock(&th->lock);
-
-	return ret;
-}
-
-static inline int pblk_gc_lun_is_emer(struct pblk *pblk, struct nvm_lun *lun)
-{
-	struct pblk_gc_thresholds *th = &pblk->gc_ths;
-
-#ifdef CONFIG_NVM_DEBUG
-	lockdep_assert_held(&lun->lock);
-#endif
-	return (lun->nr_free_blocks < th->emergency);
-}
-
-static inline int pblk_emergency_gc_mode(struct pblk *pblk)
-{
-	struct pblk_gc_thresholds *th = &pblk->gc_ths;
-	int ret;
-
-	spin_lock(&th->lock);
-	ret = th->user_io_rate;
-	spin_unlock(&th->lock);
-
-	return ret;
 }
 
 static inline int ppa_cmp_blk(struct ppa_addr ppa1, struct ppa_addr ppa2)
