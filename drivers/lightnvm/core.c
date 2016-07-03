@@ -178,10 +178,16 @@ static struct nvm_dev *nvm_find_nvm_dev(const char *name)
 	return NULL;
 }
 
-struct nvm_block *nvm_get_blk(struct nvm_dev *dev, struct nvm_lun *lun,
-							unsigned long flags)
+struct nvm_block *nvm_get_blk_unlocked(struct nvm_dev *dev, struct nvm_lun *lun)
 {
-	return dev->mt->get_blk(dev, lun, flags);
+	return dev->mt->get_blk_unlocked(dev, lun);
+}
+EXPORT_SYMBOL(nvm_get_blk_unlocked);
+
+
+struct nvm_block *nvm_get_blk(struct nvm_dev *dev, struct nvm_lun *lun)
+{
+	return dev->mt->get_blk(dev, lun);
 }
 EXPORT_SYMBOL(nvm_get_blk);
 

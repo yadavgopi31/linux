@@ -332,7 +332,6 @@ static int gen_luns_init(struct nvm_dev *dev, struct gen_dev *gn)
 		INIT_LIST_HEAD(&lun->used_list);
 		INIT_LIST_HEAD(&lun->bb_list);
 
-		lun->reserved_blocks = 2; /* for GC only */
 		lun->vlun.id = i;
 		lun->vlun.lun_id = i % dev->luns_per_chnl;
 		lun->vlun.chnl_id = i / dev->luns_per_chnl;
@@ -544,21 +543,17 @@ static void gen_unregister(struct nvm_dev *dev)
 	module_put(THIS_MODULE);
 }
 
-static struct nvm_block *gen_get_blk(struct nvm_dev *dev,
-				struct nvm_lun *vlun, unsigned long flags)
+static struct nvm_block *gen_get_blk_unlocked(struct nvm_dev *dev,
+					      struct nvm_lun *vlun)
 {
 	struct gen_lun *lun = container_of(vlun, struct gen_lun, vlun);
 	struct nvm_block *blk = NULL;
-	int is_gc = flags & NVM_IOTYPE_GC;
 
-	spin_lock(&vlun->lock);
-	if (list_empty(&lun->free_list)) {
-		pr_err_ratelimited("gen: lun %u have no free pages available",
-								lun->vlun.id);
-		goto out;
-	}
+#ifdef CONFIG_NVM_DEBUG
+	lockdep_assert_held(&vlun->lock);
+#endif
 
-	if (!is_gc && lun->vlun.nr_free_blocks < lun->reserved_blocks)
+	if (list_empty(&lun->free_list))
 		goto out;
 
 	blk = list_first_entry(&lun->free_list, struct nvm_block, list);
@@ -566,8 +561,23 @@ static struct nvm_block *gen_get_blk(struct nvm_dev *dev,
 	list_move_tail(&blk->list, &lun->used_list);
 	blk->state = NVM_BLK_ST_TGT;
 	lun->vlun.nr_free_blocks--;
+
+#ifdef CONFIG_NVM_DEBUG
+	BUG_ON(lun->vlun.nr_free_blocks > dev->blks_per_lun);
+#endif
+
 out:
+	return blk;
+}
+
+static struct nvm_block *gen_get_blk(struct nvm_dev *dev, struct nvm_lun *vlun)
+{
+	struct nvm_block *blk;
+
+	spin_lock(&vlun->lock);
+	blk = gen_get_blk_unlocked(dev, vlun);
 	spin_unlock(&vlun->lock);
+
 	return blk;
 }
 
@@ -718,6 +728,7 @@ static struct nvmm_type gen = {
 	.remove_tgt		= gen_remove_tgt,
 
 	.get_blk		= gen_get_blk,
+	.get_blk_unlocked	= gen_get_blk_unlocked,
 	.put_blk		= gen_put_blk,
 
 	.submit_io		= gen_submit_io,
