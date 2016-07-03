@@ -26,25 +26,21 @@ static void blk_pool_alloc_ws(struct work_struct *work)
 	struct pblk_block *rblk;
 	void *bitmap = blk_pool->bitmap;
 	int nr_luns = blk_pool->nr_luns;
-	int gen_emergency_gc;
 	int nr_elems;
 	int bit;
 
 provision:
-	gen_emergency_gc = pblk_emergency_gc_mode(pblk);
-
 	bit = -1;
 	while ((bit = find_next_zero_bit(bitmap, nr_luns, bit + 1)) <
 								nr_luns) {
 		rlun = &pblk->luns[bit];
 		queue = &blk_pool->queues[bit];
 
-		if (pblk_enable_emergengy_gc(pblk, rlun))
-			gen_emergency_gc = 1;
+		pblk_enable_emergengy_gc(pblk, rlun);
 
-		rblk = pblk_get_blk(pblk, rlun, gen_emergency_gc);
+		rblk = pblk_get_blk(pblk, rlun);
 		if (!rblk) {
-			pr_debug("pblk: LUN %d has no blocks\n", bit);
+			pr_debug("pblk: could not get new block\n");
 			continue;
 		}
 

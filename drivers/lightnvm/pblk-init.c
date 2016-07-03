@@ -539,7 +539,7 @@ static int pblk_luns_configure(struct pblk *pblk)
 		rlun = &pblk->luns[i];
 
 		/* Get firs active block directly from mm pool */
-		rblk = pblk_get_blk(pblk, rlun, 0);
+		rblk = pblk_get_blk(pblk, rlun);
 		if (!rblk)
 			goto err;
 

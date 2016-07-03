@@ -1111,8 +1111,7 @@ void pblk_init_blk_meta(struct pblk *pblk, struct pblk_block *rblk,
 	pblk_rlpg_set_bitmaps(rlpg, rblk, nr_entries);
 }
 
-struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
-				unsigned long flags)
+struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct nvm_lun *lun = rlun->parent;
@@ -1125,7 +1124,7 @@ struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
 		return NULL;
 
 retry:
-	blk = nvm_get_blk(pblk->dev, lun, flags);
+	blk = nvm_get_blk(pblk->dev, lun);
 	if (!blk) {
 		pr_err("pblk: cannot get new block from media manager\n");
 		goto fail_free_rlpg;
@@ -1178,7 +1177,7 @@ void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk)
 }
 
 static int pblk_replace_blk(struct pblk *pblk, struct pblk_block *rblk,
-			    struct pblk_lun *rlun, int is_bb, int emergency_gc)
+			    struct pblk_lun *rlun, int is_bb)
 {
 	rblk = pblk_blk_pool_get(pblk, rlun);
 	if (!rblk)
@@ -2076,7 +2075,7 @@ try_cur:
 
 	/* Prepare block for next write */
 	if (block_is_full(pblk, rblk)) {
-		if (!pblk_replace_blk(pblk, rblk, rlun, 0, gen_emergency_gc)) {
+		if (!pblk_replace_blk(pblk, rblk, rlun, 0)) {
 			spin_unlock(&rlun->lock);
 			schedule();
 			goto try_lun;
@@ -2086,7 +2085,7 @@ try_cur:
 
 	/* Account for grown bad blocks */
 	if (unlikely(block_is_bad(rblk))) {
-		if (!pblk_replace_blk(pblk, rblk, rlun, 1, gen_emergency_gc)) {
+		if (!pblk_replace_blk(pblk, rblk, rlun, 1)) {
 			spin_unlock(&rlun->lock);
 			schedule();
 			goto try_lun;

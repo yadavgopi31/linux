@@ -508,8 +508,7 @@ int pblk_submit_read_list(struct pblk *pblk, struct bio *bio,
 				 unsigned int nr_rec_secs,
 				 unsigned long flags);
 void pblk_pad_open_blks(struct pblk *pblk);
-struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun,
-				unsigned long flags);
+struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun);
 void pblk_end_close_blk_bio(struct pblk *pblk, struct nvm_rq *rqd, int run_gc);
 void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk);
 void pblk_write_timer_fn(unsigned long data);
@@ -551,7 +550,7 @@ void pblk_gc_queue(struct work_struct *work);
 void pblk_gc(struct work_struct *work);
 int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
 			    u64 *lba_list, unsigned int nr_entries);
-int pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun);
+void pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun);
 void pblk_gc_kick(struct pblk *pblk);
 
 #ifdef CONFIG_NVM_DEBUG

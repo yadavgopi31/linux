@@ -458,7 +458,7 @@ void pblk_gc(struct work_struct *work)
 		pblk_lun_gc(pblk, rlun);
 }
 
-int pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun)
+void pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun)
 {
 	struct nvm_lun *lun = rlun->parent;
 	int emergency_th, emergency_gc;
@@ -481,10 +481,7 @@ int pblk_enable_emergengy_gc(struct pblk *pblk, struct pblk_lun *rlun)
 	if (!emergency_gc && emergency_th) {
 		pblk_emergency_gc_on(pblk, lun->id);
 		pblk_gc_kick(pblk);
-		return 1;
 	}
-
-	return 0;
 }
 
 /*
