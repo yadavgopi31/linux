@@ -446,7 +446,7 @@ static void pblk_block_gc(struct work_struct *work)
 		goto free_recov_page;
 	}
 
-	bit = -1;
+	bit = 0;
 next_lba_list:
 	nr_ppas = 0;
 	do {
@@ -454,13 +454,21 @@ next_lba_list:
 						pblk->nr_blk_dsecs, bit);
 		gc_lba_list[nr_ppas] = lba_list[bit];
 
-		nr_ppas++;
-		bit++;
 		if (bit > pblk->nr_blk_dsecs)
 			goto prepare_ppas;
+
+		nr_ppas++;
+		bit++;
 	} while (nr_ppas < PBLK_MAX_REQ_ADDRS);
 
 prepare_ppas:
+	if (nr_ppas == 0) {
+#if CONFIG_NVM_DEBUG
+		BUG_ON(!bitmap_empty(rblk->invalid_bitmap, pblk->nr_blk_dsecs));
+#endif
+		goto put_block;
+	}
+
 	moved = pblk_gc_move_valid_secs(pblk, rblk, gc_lba_list, nr_ppas);
 	if (moved != nr_ppas) {
 		pr_err("pblk: could not GC all sectors:blk:%lu, GC:%d/%d/%d\n",
@@ -474,6 +482,7 @@ prepare_ppas:
 	if (total_moved < nr_valid_secs)
 		goto next_lba_list;
 
+put_block:
 	spin_lock(&rblk->lock);
 	pblk_put_blk(pblk, rblk);
 	spin_unlock(&rblk->lock);
