@@ -1119,7 +1119,6 @@ static void pblk_sync_buffer(struct pblk *pblk, struct pblk_block *rblk,
 
 #ifdef CONFIG_NVM_DEBUG
 	atomic_inc(&pblk->sync_writes);
-	atomic_dec(&pblk->inflight_writes);
 #endif
 
 	/* If last page completed, then this is not a grown bad block */
@@ -1183,6 +1182,10 @@ static void pblk_compl_queue(struct pblk *pblk, struct nvm_rq *rqd,
 	unsigned long pos;
 
 	atomic_sub(c_ctx->nr_valid, &pblk->write_inflight);
+
+#ifdef CONFIG_NVM_DEBUG
+	atomic_sub(c_ctx->nr_valid, &pblk->inflight_writes);
+#endif
 
 	/* Kick write thread if waiting */
 	if (waitqueue_active(&pblk->wait))
