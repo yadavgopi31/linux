@@ -507,7 +507,7 @@ int pblk_bio_add_pages(struct pblk *pblk, struct bio *bio, gfp_t flags,
 void pblk_bio_free_pages(struct pblk *pblk, struct bio *bio, int off,
 			 int nr_pages);
 int pblk_update_map(struct pblk *pblk, sector_t laddr, struct pblk_block *rblk,
-		    struct ppa_addr ppa, int inval);
+		    struct ppa_addr ppa);
 int pblk_update_map_gc(struct pblk *pblk, sector_t laddr,
 		       struct pblk_block *rblk, struct ppa_addr ppa,
 		       struct pblk_block *gc_rblk);

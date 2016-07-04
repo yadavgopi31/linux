@@ -270,7 +270,7 @@ static void pblk_rb_requeue_entry(struct pblk_rb *rb,
 	pblk_rb_write_entry(rb, entry->data, entry->w_ctx, mem);
 
 	ppa = pblk_cacheline_to_ppa(mem);
-	pblk_update_map(pblk, entry->w_ctx.lba, NULL, ppa, 0);
+	pblk_update_map(pblk, entry->w_ctx.lba, NULL, ppa);
 	/* Update memory pointer (head) */
 	smp_store_release(&rb->mem, (mem + 1) & (rb->nr_entries - 1));
 
@@ -285,7 +285,7 @@ static void pblk_rb_update_map(struct pblk *pblk, struct pblk_w_ctx *w_ctx)
 	struct pblk_block *rblk = w_ctx->ppa.rblk;
 	struct ppa_addr ppa = w_ctx->ppa.ppa;
 
-	pblk_update_map(pblk, w_ctx->lba, rblk, ppa, 0);
+	pblk_update_map(pblk, w_ctx->lba, rblk, ppa);
 }
 
 static int __pblk_rb_update_l2p(struct pblk_rb *rb, unsigned long *l2p_upd,

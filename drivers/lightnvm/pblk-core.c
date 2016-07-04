@@ -761,7 +761,7 @@ static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 		pblk_rb_write_entry(&pblk->rwb, data, w_ctx, pos);
 		ppa = pblk_cacheline_to_ppa(pblk_rb_wrap_pos(&pblk->rwb, pos));
 
-		pblk_update_map(pblk, w_ctx.lba, NULL, ppa, 1);
+		pblk_update_map(pblk, w_ctx.lba, NULL, ppa);
 
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 	}
@@ -1399,7 +1399,7 @@ int pblk_media_write(void *data)
 }
 
 int pblk_update_map(struct pblk *pblk, sector_t laddr, struct pblk_block *rblk,
-		    struct ppa_addr ppa, int inval)
+		    struct ppa_addr ppa)
 {
 	struct pblk_addr *gp;
 	int ret = 0;
@@ -1414,12 +1414,7 @@ int pblk_update_map(struct pblk *pblk, sector_t laddr, struct pblk_block *rblk,
 	spin_lock(&pblk->trans_lock);
 	gp = &pblk->trans_map[laddr];
 
-#ifdef CONFIG_NVM_DEBUG
-	if ((inval && rblk != NULL) || (!inval && gp->rblk))
-		BUG_ON(1);
-#endif
-
-	if (inval && gp->rblk)
+	if (gp->rblk)
 		pblk_page_invalidate(pblk, gp);
 
 	gp->ppa = ppa;
@@ -1434,6 +1429,7 @@ int pblk_update_map_gc(struct pblk *pblk, sector_t laddr,
 		       struct pblk_block *gc_rblk)
 {
 	struct pblk_addr *gp;
+	int map_is_gc;
 	int ret = 0;
 
 	BUG_ON(laddr >= pblk->nr_secs);
@@ -1441,13 +1437,10 @@ int pblk_update_map_gc(struct pblk *pblk, sector_t laddr,
 	spin_lock(&pblk->trans_lock);
 	gp = &pblk->trans_map[laddr];
 
-	if (gp->rblk) {
-		/* Prevent updated entries to be overwritten by GC */
-		if (gc_rblk != gp->rblk)
-			goto out;
-
-		pblk_page_invalidate(pblk, gp);
-	}
+	/* Prevent updated entries to be overwritten by GC */
+	map_is_gc = gc_rblk != gp->rblk;
+	if (gp->rblk && map_is_gc)
+		goto out;
 
 	gp->ppa = ppa;
 	gp->rblk = rblk;
