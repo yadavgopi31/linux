@@ -174,6 +174,10 @@ err:
 	return -1;
 }
 
+/*
+ * There is no guarantee that the value read from cache has not been updated. In
+ * order to guarantee that writes and reads are ordered, a flush must be issued
+ */
 void pblk_read_from_cache(struct pblk *pblk, struct bio *bio,
 			  struct ppa_addr ppa)
 {
@@ -201,8 +205,6 @@ int pblk_read_rq(struct pblk *pblk, struct bio *bio, struct nvm_rq *rqd,
 {
 	struct pblk_addr *gp;
 	struct ppa_addr ppa;
-	int cache_read_state;
-	int lookup_cache = 0;
 	int ret = NVM_IO_OK;
 
 	if (laddr == ADDR_EMPTY) {
@@ -216,35 +218,19 @@ int pblk_read_rq(struct pblk *pblk, struct bio *bio, struct nvm_rq *rqd,
 	spin_lock(&pblk->trans_lock);
 	gp = &pblk->trans_map[laddr];
 	ppa = gp->ppa;
-
-	if (nvm_addr_in_cache(ppa)) {
-		cache_read_state = nvm_addr_get_read_cache(gp->ppa);
-		nvm_addr_set_read_cache(&gp->ppa, 1);
-		lookup_cache = 1;
-	}
 	spin_unlock(&pblk->trans_lock);
 
 	if (ppa_empty(ppa)) {
 		WARN_ON(test_and_set_bit(0, read_bitmap));
-		ret = NVM_IO_DONE;
-		goto unlock;
+		return NVM_IO_DONE;
 	}
 
 	if (pblk_try_read_from_cache(pblk, bio, ppa)) {
 		WARN_ON(test_and_set_bit(0, read_bitmap));
-		ret = NVM_IO_DONE;
-		goto unlock;
+		return NVM_IO_DONE;
 	}
 
 	rqd->ppa_addr = ppa;
-
-unlock:
-	if (lookup_cache) {
-		spin_lock(&pblk->trans_lock);
-		if (nvm_addr_in_cache(ppa))
-			nvm_addr_set_read_cache(&gp->ppa, 0);
-		spin_unlock(&pblk->trans_lock);
-	}
 
 #ifdef CONFIG_NVM_DEBUG
 	atomic_inc(&pblk->inflight_reads);
@@ -254,71 +240,8 @@ out:
 	return ret;
 }
 
-static int pblk_lock_read(struct pblk_addr *gp, int *cache_read_state, int off)
-{
-	if (nvm_addr_in_cache(gp->ppa)) {
-		cache_read_state[off] = nvm_addr_get_read_cache(gp->ppa);
-		nvm_addr_set_read_cache(&gp->ppa, 1);
-		return 1;
-	}
-
-	return 0;
-}
-
-static int pblk_setup_seq_reads(struct pblk *pblk, struct ppa_addr *ppas,
-				int *cache_read_state, sector_t bladdr,
-				int nr_secs)
-{
-	struct pblk_addr *gp;
-	int locked = 0;
-	int i;
-
-	spin_lock(&pblk->trans_lock);
-	for (i = 0; i < nr_secs; i++) {
-		gp = &pblk->trans_map[bladdr + i];
-		ppas[i] = gp->ppa;
-
-		locked = pblk_lock_read(gp, cache_read_state, i);
-	}
-	spin_unlock(&pblk->trans_lock);
-
-	return locked;
-}
-
-static int pblk_setup_rand_reads(struct pblk *pblk, struct ppa_addr *ppas,
-				 int *cache_read_state, u64 *lba_list,
-				 int nr_secs)
-{
-	struct pblk_addr *gp;
-	sector_t lba;
-	int locked = 0;
-	int i;
-
-	spin_lock(&pblk->trans_lock);
-	for (i = 0; i < nr_secs; i++) {
-		lba = lba_list[i];
-		if (lba == ADDR_EMPTY)
-			continue;
-
-		gp = &pblk->trans_map[lba];
-		ppas[i] = gp->ppa;
-
-		locked = pblk_lock_read(gp, cache_read_state, i);
-	}
-	spin_unlock(&pblk->trans_lock);
-
-	return locked;
-}
-
-static void pblk_unlock_read(struct pblk_addr *gp, int off)
-{
-	if (nvm_addr_in_cache(gp->ppa))
-		nvm_addr_set_read_cache(&gp->ppa, 0);
-}
-
-static void pblk_unlock_seq_reads(struct pblk *pblk, struct ppa_addr *ppas,
-				  int *cache_read_state, sector_t bladdr,
-				  int nr_secs)
+static void pblk_setup_seq_reads(struct pblk *pblk, struct ppa_addr *ppas,
+				sector_t bladdr, int nr_secs)
 {
 	struct pblk_addr *gp;
 	int i;
@@ -326,15 +249,13 @@ static void pblk_unlock_seq_reads(struct pblk *pblk, struct ppa_addr *ppas,
 	spin_lock(&pblk->trans_lock);
 	for (i = 0; i < nr_secs; i++) {
 		gp = &pblk->trans_map[bladdr + i];
-
-		pblk_unlock_read(gp, i);
+		ppas[i] = gp->ppa;
 	}
 	spin_unlock(&pblk->trans_lock);
 }
 
-static void pblk_unlock_rand_reads(struct pblk *pblk, struct ppa_addr *ppas,
-				   int *cache_read_state, u64 *lba_list,
-				   int nr_secs)
+static void pblk_setup_rand_reads(struct pblk *pblk, struct ppa_addr *ppas,
+				 u64 *lba_list, int nr_secs)
 {
 	struct pblk_addr *gp;
 	sector_t lba;
@@ -347,7 +268,7 @@ static void pblk_unlock_rand_reads(struct pblk *pblk, struct ppa_addr *ppas,
 			continue;
 
 		gp = &pblk->trans_map[lba];
-		pblk_unlock_read(gp, i);
+		ppas[i] = gp->ppa;
 	}
 	spin_unlock(&pblk->trans_lock);
 }
@@ -358,15 +279,12 @@ static int read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 				unsigned long *read_bitmap, unsigned long flags)
 {
 	struct ppa_addr ppas[PBLK_MAX_REQ_ADDRS];
-	int cache_read_state[PBLK_MAX_REQ_ADDRS];
 	sector_t lba;
 	int advanced_bio = 0;
 	int valid_secs = 0;
 	int i, j = 0;
-	int locked;
 
-	locked = pblk_setup_rand_reads(pblk, ppas, cache_read_state,
-							lba_list, nr_secs);
+	pblk_setup_rand_reads(pblk, ppas, lba_list, nr_secs);
 
 	for (i = 0; i < nr_secs; i++) {
 		struct ppa_addr *p = &ppas[i];
@@ -412,10 +330,6 @@ static int read_ppalist_rq_list(struct pblk *pblk, struct bio *bio,
 			bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 	}
 
-	if (locked)
-		pblk_unlock_rand_reads(pblk, ppas, cache_read_state,
-							lba_list, nr_secs);
-
 #ifdef CONFIG_NVM_DEBUG
 		atomic_add(nr_secs, &pblk->inflight_reads);
 #endif
@@ -428,15 +342,12 @@ static int pblk_read_ppalist_rq(struct pblk *pblk, struct bio *bio,
 {
 	sector_t laddr = pblk_get_laddr(bio);
 	struct ppa_addr ppas[PBLK_MAX_REQ_ADDRS];
-	int cache_read_state[PBLK_MAX_REQ_ADDRS];
 	int advanced_bio = 0;
 	int i, j = 0;
-	int locked;
 
 	BUG_ON(!(laddr >= 0 && laddr + nr_secs < pblk->nr_secs));
 
-	locked = pblk_setup_seq_reads(pblk, ppas, cache_read_state,
-							laddr, nr_secs);
+	pblk_setup_seq_reads(pblk, ppas, laddr, nr_secs);
 
 	for (i = 0; i < nr_secs; i++) {
 		struct ppa_addr *p = &ppas[i];
@@ -473,10 +384,6 @@ static int pblk_read_ppalist_rq(struct pblk *pblk, struct bio *bio,
 		if (advanced_bio)
 			bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 	}
-
-	if (locked)
-		pblk_unlock_seq_reads(pblk, ppas, cache_read_state,
-							laddr, nr_secs);
 
 #ifdef CONFIG_NVM_DEBUG
 		atomic_add(nr_secs, &pblk->inflight_reads);
@@ -854,11 +761,7 @@ static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 		pblk_rb_write_entry(&pblk->rwb, data, w_ctx, pos);
 		ppa = pblk_cacheline_to_ppa(pblk_rb_wrap_pos(&pblk->rwb, pos));
 
-try:
-		if (pblk_update_map(pblk, w_ctx.lba, NULL, ppa, 1)) {
-			schedule();
-			goto try;
-		}
+		pblk_update_map(pblk, w_ctx.lba, NULL, ppa, 1);
 
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 	}
@@ -909,11 +812,7 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 		pblk_rb_write_entry(&pblk->rwb, data, w_ctx, pos);
 		ppa = pblk_cacheline_to_ppa(pblk_rb_wrap_pos(&pblk->rwb, pos));
 
-try:
-		if (pblk_update_map_gc(pblk, w_ctx.lba, NULL, ppa, gc_rblk)) {
-			schedule();
-			goto try;
-		}
+		pblk_update_map_gc(pblk, w_ctx.lba, NULL, ppa, gc_rblk);
 
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 		valid_secs++;

@@ -562,18 +562,6 @@ ssize_t pblk_rb_sysfs(struct pblk_rb *rb, char *buf);
 
 void pblk_print_failed_rqd(struct nvm_rq *rqd, int error);
 
-static inline int nvm_addr_get_read_cache(struct ppa_addr gp)
-{
-	if (gp.c.read_cache)
-		return 1;
-	return 0;
-}
-
-static inline void nvm_addr_set_read_cache(struct ppa_addr *gp, int value)
-{
-	gp->c.read_cache = value;
-}
-
 static inline int nvm_addr_in_cache(struct ppa_addr gp)
 {
 	if (gp.ppa != ADDR_EMPTY && gp.c.is_cached)
@@ -678,10 +666,6 @@ static inline struct ppa_addr pblk_cacheline_to_ppa(u64 addr)
 	p.c.line = (u64)addr;
 	p.c.is_cached = 1;
 
-	/* When the l2p table gets updated with this cacheline, there cannot be
-	 * any active readers.
-	 */
-	p.c.read_cache = 0;
 	return p;
 }
 
@@ -704,7 +688,6 @@ static inline struct ppa_addr pblk_dev_addr_to_ppa(u64 addr)
 	struct ppa_addr gp;
 
 	gp.ppa = (u64)addr;
-	gp.c.read_cache = 0;
 	gp.c.is_cached = 0;
 
 	return gp;
@@ -841,13 +824,6 @@ static inline int pblk_update_map(struct pblk *pblk, sector_t laddr,
 	spin_lock(&pblk->trans_lock);
 	gp = &pblk->trans_map[laddr];
 
-	// if (!ppa_empty(gp->ppa) &&
-		// nvm_addr_in_cache(gp->ppa) &&
-		// nvm_addr_get_read_cache(gp->ppa)) {
-		// ret = 1;
-		// goto out;
-	// }
-
 #ifdef CONFIG_NVM_DEBUG
 	if ((inval && rblk != NULL) || (!inval && gp->rblk))
 		BUG_ON(1);
@@ -875,13 +851,6 @@ static inline int pblk_update_map_gc(struct pblk *pblk, sector_t laddr,
 
 	spin_lock(&pblk->trans_lock);
 	gp = &pblk->trans_map[laddr];
-
-	// if (!ppa_empty(gp->ppa) &&
-		// nvm_addr_in_cache(gp->ppa) &&
-		// nvm_addr_get_read_cache(gp->ppa)) {
-		// ret = 1;
-		// goto out;
-	// }
 
 	if (gp->rblk) {
 		/* Prevent updated entries to be overwritten by GC */

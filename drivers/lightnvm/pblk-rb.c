@@ -604,6 +604,8 @@ void pblk_rb_copy_to_bio(struct pblk_rb *rb, struct bio *bio, u64 pos)
 	struct pblk_rb_entry *entry;
 	void *data;
 
+	spin_lock(&rb->w_lock);
+
 #ifdef CONFIG_NVM_DEBUG
 	BUG_ON(pos >= rb->nr_entries);
 #endif
@@ -611,6 +613,8 @@ void pblk_rb_copy_to_bio(struct pblk_rb *rb, struct bio *bio, u64 pos)
 
 	data = bio_data(bio);
 	memcpy(data, entry->data, rb->seg_size);
+
+	spin_unlock(&rb->w_lock);
 }
 
 struct pblk_w_ctx *pblk_rb_w_ctx(struct pblk_rb *rb, unsigned long pos)
