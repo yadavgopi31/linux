@@ -357,7 +357,6 @@ static int pblk_rb_update_l2p(struct pblk_rb *rb, unsigned int nr_entries,
 	}
 
 	ret = __pblk_rb_update_l2p(rb, &rb->l2p_update, nr_entries, count);
-	/* Release l2p pointer when updating l2p table. Protect from sync */
 
 out:
 	return ret;
@@ -380,7 +379,6 @@ void pblk_rb_sync_l2p(struct pblk_rb *rb)
 	to_update = pblk_rb_ring_count(sync, rb->l2p_update, rb->nr_entries);
 
 	__pblk_rb_update_l2p(rb, &rb->l2p_update, to_update, to_update);
-	/* Release l2p pointer when updating l2p table. Protect from update*/
 
 	spin_unlock(&rb->w_lock);
 }

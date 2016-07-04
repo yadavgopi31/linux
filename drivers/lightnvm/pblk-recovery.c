@@ -439,7 +439,7 @@ int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk)
 		ppa = pblk_ppa_to_gaddr(dev, bppa + i);
 		if (lba_list[i] != ADDR_EMPTY &&
 					!nvm_boundary_checks(dev, &ppa, 1)) {
-			pblk_update_map(pblk, lba_list[i], rblk, ppa, 0);
+			pblk_update_map(pblk, lba_list[i], rblk, ppa);
 		}
 		/*TODO: when not padding the whole block, mark as invalid */
 	}

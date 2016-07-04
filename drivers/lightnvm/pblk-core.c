@@ -1017,10 +1017,8 @@ struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun)
 
 retry:
 	blk = nvm_get_blk(pblk->dev, lun);
-	if (!blk) {
-		pr_err("pblk: cannot get new block from media manager\n");
+	if (!blk)
 		goto fail_free_rlpg;
-	}
 
 	rblk = pblk_get_rblk(rlun, blk->id);
 	blk->priv = rblk;
