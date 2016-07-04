@@ -118,6 +118,12 @@ int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 
 	spin_lock(&rblk->lock);
 	paddr = pblk_alloc_page(pblk, rblk);
+
+	if (paddr == ADDR_EMPTY) {
+		spin_unlock(&rblk->lock);
+		return 1;
+	}
+
 	for (i = 0; i < nr_secs; i++, paddr++) {
 		if (paddr == ADDR_EMPTY) {
 			/* We should always have available sectors for a full
@@ -209,15 +215,6 @@ try_lun:
 try_cur:
 	rblk = rlun->cur;
 
-	if (block_is_full(pblk, rblk)) {
-		if (!pblk_replace_blk(pblk, rblk, rlun, 0)) {
-			spin_unlock(&rlun->lock);
-			schedule();
-			goto try_lun;
-		}
-		goto try_cur;
-	}
-
 	/* Account for grown bad blocks */
 	if (unlikely(block_is_bad(rblk))) {
 		if (!pblk_replace_blk(pblk, rblk, rlun, 1)) {
@@ -230,6 +227,14 @@ try_cur:
 
 	ret = pblk_map_page(pblk, rblk, sentry, ppa_list, meta_list,
 							nr_secs, valid_secs);
+	if (ret) {
+		if (!pblk_replace_blk(pblk, rblk, rlun, 0)) {
+			spin_unlock(&rlun->lock);
+			schedule();
+			goto try_lun;
+		}
+		goto try_cur;
+	}
 
 	spin_unlock(&rlun->lock);
 	return ret;
