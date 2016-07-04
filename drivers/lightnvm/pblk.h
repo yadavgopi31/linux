@@ -467,33 +467,18 @@ int pblk_rb_pos_oob(struct pblk_rb *rb, u64 pos);
 void pblk_rb_data_free(struct pblk_rb *rb);
 
 /*
- * pblk shared operations
+ * pblk core
  */
+int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
+		  unsigned int sentry, struct ppa_addr *ppa_list,
+		  struct pblk_sec_meta *meta_list,
+		  unsigned int nr_secs, unsigned int valid_secs);
 struct nvm_rq *pblk_alloc_rqd(struct pblk *pblk, int rw);
 void pblk_free_rqd(struct pblk *pblk, struct nvm_rq *rqd, int rw);
-int pblk_calc_secs_to_sync(struct pblk *pblk, unsigned long secs_avail,
-			   unsigned long secs_to_flush);
-int pblk_buffer_write(struct pblk *pblk, struct bio *bio, unsigned long flags);
 void pblk_flush_writer(struct pblk *pblk);
-int pblk_read_rq(struct pblk *pblk, struct bio *bio, struct nvm_rq *rqd,
-		 sector_t laddr, unsigned long *read_bitmap,
-		 unsigned long flags);
-int pblk_submit_read(struct pblk *pblk, struct bio *bio, unsigned long flags);
-int pblk_submit_read_io(struct pblk *pblk, struct bio *bio,
-			struct nvm_rq *rqd, unsigned long flags);
-int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
-			       unsigned long *read_bitmap, struct nvm_rq *rqd,
-			       uint8_t nr_secs);
 void pblk_discard(struct pblk *pblk, struct bio *bio);
-int pblk_setup_w_multi(struct pblk *pblk, struct nvm_rq *rqd,
-		       struct pblk_ctx *ctx, struct pblk_sec_meta *meta,
-		       unsigned int valid_secs, int off);
-int pblk_setup_w_single(struct pblk *pblk, struct nvm_rq *rqd,
-			struct pblk_ctx *ctx, struct pblk_sec_meta *meta);
 int pblk_alloc_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		    struct pblk_ctx *ctx, unsigned int nr_secs);
-void pblk_read_from_cache(struct pblk *pblk, struct bio *bio,
-			  struct ppa_addr ppa);
 void pblk_init_blk_meta(struct pblk *pblk, struct pblk_block *rblk,
 			struct pblk_blk_rec_lpg *rlpg);
 void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk);
@@ -501,17 +486,13 @@ void pblk_put_blk_unlocked(struct pblk *pblk, struct pblk_block *rblk);
 void pblk_end_io(struct nvm_rq *rqd);
 void pblk_end_sync_bio(struct bio *bio);
 void pblk_free_blks(struct pblk *pblk);
-int pblk_media_write(void *data);
-int pblk_submit_read_list(struct pblk *pblk, struct bio *bio,
-				 struct nvm_rq *rqd, u64 *lba_list,
-				 unsigned int nr_secs,
-				 unsigned int nr_rec_secs,
-				 unsigned long flags);
 void pblk_pad_open_blks(struct pblk *pblk);
 struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun);
 void pblk_end_close_blk_bio(struct pblk *pblk, struct nvm_rq *rqd, int run_gc);
 void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk);
-void pblk_write_timer_fn(unsigned long data);
+void pblk_run_blk_ws(struct pblk *pblk, struct pblk_block *rblk,
+		     void (*work)(struct work_struct *));
+
 void pblk_write_kick_timer_fn(unsigned long data);
 int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 			     u64 *lba_list,
@@ -521,6 +502,44 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 			     unsigned long flags,
 			     struct pblk_block *gc_rblk);
 void pblk_may_submit_write(struct pblk *pblk, int nr_secs);
+int pblk_bio_add_pages(struct pblk *pblk, struct bio *bio, gfp_t flags,
+		       int nr_pages);
+void pblk_bio_free_pages(struct pblk *pblk, struct bio *bio, int off,
+			 int nr_pages);
+int pblk_update_map(struct pblk *pblk, sector_t laddr, struct pblk_block *rblk,
+		    struct ppa_addr ppa, int inval);
+int pblk_update_map_gc(struct pblk *pblk, sector_t laddr,
+		       struct pblk_block *rblk, struct ppa_addr ppa,
+		       struct pblk_block *gc_rblk);
+
+/* pblk write path */
+int pblk_buffer_write(struct pblk *pblk, struct bio *bio, unsigned long flags);
+int pblk_submit_write(struct pblk *pblk);
+int pblk_media_write(void *data);
+void pblk_write_timer_fn(unsigned long data);
+int pblk_setup_w_multi(struct pblk *pblk, struct nvm_rq *rqd,
+		       struct pblk_ctx *ctx, struct pblk_sec_meta *meta,
+		       unsigned int valid_secs, int off);
+int pblk_setup_w_single(struct pblk *pblk, struct nvm_rq *rqd,
+			struct pblk_ctx *ctx, struct pblk_sec_meta *meta);
+
+/* pblk read path */
+int pblk_read_rq(struct pblk *pblk, struct bio *bio, struct nvm_rq *rqd,
+		 sector_t laddr, unsigned long *read_bitmap,
+		 unsigned long flags);
+int pblk_submit_read(struct pblk *pblk, struct bio *bio, unsigned long flags);
+int pblk_submit_read_io(struct pblk *pblk, struct bio *bio,
+			struct nvm_rq *rqd, unsigned long flags);
+int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
+			       unsigned long *read_bitmap, struct nvm_rq *rqd,
+			       uint8_t nr_secs);
+int pblk_submit_read_list(struct pblk *pblk, struct bio *bio,
+				 struct nvm_rq *rqd, u64 *lba_list,
+				 unsigned int nr_secs,
+				 unsigned int nr_rec_secs,
+				 unsigned long flags);
+void pblk_read_from_cache(struct pblk *pblk, struct bio *bio,
+			  struct ppa_addr ppa);
 
 /* pblk block pool*/
 int pblk_blk_pool_init(struct pblk *pblk);
@@ -790,82 +809,6 @@ static inline struct ppa_addr pblk_blk_ppa_to_gaddr(struct nvm_dev *dev,
 
 	paddr.ppa = addr;
 	return blk_linear_to_generic_addr(dev, baddr, paddr);
-}
-
-static void pblk_page_invalidate(struct pblk *pblk, struct pblk_addr *a)
-{
-	struct pblk_block *rblk = a->rblk;
-	u64 block_ppa;
-
-#ifdef CONFIG_NVM_DEBUG
-	BUG_ON(nvm_addr_in_cache(a->ppa));
-	BUG_ON(ppa_empty(a->ppa));
-#endif
-
-	block_ppa = pblk_gaddr_to_pg_offset(pblk->dev, a->ppa);
-	WARN_ON(test_and_set_bit(block_ppa, rblk->invalid_bitmap));
-	rblk->nr_invalid_secs++;
-}
-
-static inline int pblk_update_map(struct pblk *pblk, sector_t laddr,
-				  struct pblk_block *rblk, struct ppa_addr ppa,
-				  int inval)
-{
-	struct pblk_addr *gp;
-	int ret = 0;
-
-#ifdef CONFIG_NVM_DEBUG
-	BUG_ON(!rblk &&
-		pblk_rb_pos_oob(&pblk->rwb, nvm_addr_to_cacheline(ppa)));
-#endif
-
-	BUG_ON(laddr >= pblk->nr_secs);
-
-	spin_lock(&pblk->trans_lock);
-	gp = &pblk->trans_map[laddr];
-
-#ifdef CONFIG_NVM_DEBUG
-	if ((inval && rblk != NULL) || (!inval && gp->rblk))
-		BUG_ON(1);
-#endif
-
-	if (inval && gp->rblk)
-		pblk_page_invalidate(pblk, gp);
-
-	gp->ppa = ppa;
-	gp->rblk = rblk;
-
-	spin_unlock(&pblk->trans_lock);
-	return ret;
-}
-
-static inline int pblk_update_map_gc(struct pblk *pblk, sector_t laddr,
-				     struct pblk_block *rblk,
-				     struct ppa_addr ppa,
-				     struct pblk_block *gc_rblk)
-{
-	struct pblk_addr *gp;
-	int ret = 0;
-
-	BUG_ON(laddr >= pblk->nr_secs);
-
-	spin_lock(&pblk->trans_lock);
-	gp = &pblk->trans_map[laddr];
-
-	if (gp->rblk) {
-		/* Prevent updated entries to be overwritten by GC */
-		if (gc_rblk != gp->rblk)
-			goto out;
-
-		pblk_page_invalidate(pblk, gp);
-	}
-
-	gp->ppa = ppa;
-	gp->rblk = rblk;
-
-out:
-	spin_unlock(&pblk->trans_lock);
-	return ret;
 }
 
 static inline struct pblk_block *pblk_get_rblk(struct pblk_lun *rlun,
