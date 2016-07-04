@@ -518,7 +518,8 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 			     struct pblk_kref_buf *ref_buf,
 			     unsigned int nr_secs,
 			     unsigned int nr_rec_secs,
-			     unsigned long flags);
+			     unsigned long flags,
+			     struct pblk_block *gc_rblk);
 void pblk_may_submit_write(struct pblk *pblk, int nr_secs);
 
 /* pblk block pool*/
@@ -825,7 +826,7 @@ static void pblk_page_invalidate(struct pblk *pblk, struct pblk_addr *a)
 
 static inline int pblk_update_map(struct pblk *pblk, sector_t laddr,
 				  struct pblk_block *rblk, struct ppa_addr ppa,
-				  int inval_entry)
+				  int inval)
 {
 	struct pblk_addr *gp;
 	int ret = 0;
@@ -840,15 +841,55 @@ static inline int pblk_update_map(struct pblk *pblk, sector_t laddr,
 	spin_lock(&pblk->trans_lock);
 	gp = &pblk->trans_map[laddr];
 
-	if (!ppa_empty(gp->ppa) &&
-		nvm_addr_in_cache(gp->ppa) &&
-		nvm_addr_get_read_cache(gp->ppa)) {
-		ret = 1;
-		goto out;
-	}
+	// if (!ppa_empty(gp->ppa) &&
+		// nvm_addr_in_cache(gp->ppa) &&
+		// nvm_addr_get_read_cache(gp->ppa)) {
+		// ret = 1;
+		// goto out;
+	// }
 
-	if (inval_entry && gp->rblk)
+#ifdef CONFIG_NVM_DEBUG
+	if ((inval && rblk != NULL) || (!inval && gp->rblk))
+		BUG_ON(1);
+#endif
+
+	if (inval && gp->rblk)
 		pblk_page_invalidate(pblk, gp);
+
+	gp->ppa = ppa;
+	gp->rblk = rblk;
+
+	spin_unlock(&pblk->trans_lock);
+	return ret;
+}
+
+static inline int pblk_update_map_gc(struct pblk *pblk, sector_t laddr,
+				     struct pblk_block *rblk,
+				     struct ppa_addr ppa,
+				     struct pblk_block *gc_rblk)
+{
+	struct pblk_addr *gp;
+	int ret = 0;
+
+	BUG_ON(laddr >= pblk->nr_secs);
+
+	spin_lock(&pblk->trans_lock);
+	gp = &pblk->trans_map[laddr];
+
+	// if (!ppa_empty(gp->ppa) &&
+		// nvm_addr_in_cache(gp->ppa) &&
+		// nvm_addr_get_read_cache(gp->ppa)) {
+		// ret = 1;
+		// goto out;
+	// }
+
+	if (gp->rblk) {
+		/* Prevent updated entries to be overwritten by GC */
+		if (gc_rblk != gp->rblk)
+			goto out;
+
+		pblk_page_invalidate(pblk, gp);
+	}
 
 	gp->ppa = ppa;
 	gp->rblk = rblk;

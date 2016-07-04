@@ -249,7 +249,8 @@ static int pblk_gc_write_to_buffer(struct pblk *pblk, u64 *lba_list,
 				   void *data, struct pblk_kref_buf *ref_buf,
 				   unsigned int data_len,
 				   unsigned int secs_to_gc,
-				   unsigned int secs_in_disk, int off)
+				   unsigned int secs_in_disk, int off,
+				   struct pblk_block *gc_rblk)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct request_queue *q = dev->q;
@@ -267,7 +268,7 @@ static int pblk_gc_write_to_buffer(struct pblk *pblk, u64 *lba_list,
 write_retry:
 	if (pblk_write_list_to_cache(pblk, bio, &lba_list[off], ref_buf,
 						secs_to_gc, secs_in_disk,
-						PBLK_IOTYPE_REF)) {
+						PBLK_IOTYPE_REF, gc_rblk)) {
 		schedule();
 		goto write_retry;
 	}
@@ -337,7 +338,7 @@ int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
 		/* Write to buffer */
 		if (pblk_gc_write_to_buffer(pblk, lba_list, data, ref_buf,
 						data_len, secs_to_gc,
-						secs_in_disk, off))
+						secs_in_disk, off, rblk))
 			goto fail_free_krefbuf;
 
 next:

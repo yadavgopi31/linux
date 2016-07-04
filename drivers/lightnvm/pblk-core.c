@@ -811,28 +811,13 @@ static int pblk_setup_write_to_cache(struct pblk *pblk, struct bio *bio,
 	return 1;
 }
 
-static void pblk_update_cache_map(struct pblk *pblk, struct bio *bio,
-				  struct pblk_w_ctx *w_ctx, unsigned long pos,
-				  int inval_entry)
-{
-	void *data = bio_data(bio);
-	struct ppa_addr ppa;
-
-	pblk_rb_write_entry(&pblk->rwb, data, *w_ctx, pos);
-	ppa = pblk_cacheline_to_ppa(pblk_rb_wrap_pos(&pblk->rwb, pos));
-
-try:
-	if (pblk_update_map(pblk, w_ctx->lba, NULL, ppa, inval_entry)) {
-		schedule();
-		goto try;
-	}
-}
-
 /*
  * Copy data from current bio to write buffer. This if necessary to guarantee
  * that (i) writes to the media at issued at the right granurality and (ii) that
  * memory-specific constrains are respected (e.g., TLC memories need to write
  * upper, medium and lower pages to guarantee that data has been persisted).
+ *
+ * This path is exclusively taken by user I/O.
  *
  * return: 1 if bio has been written to buffer, 0 otherwise.
  */
@@ -842,7 +827,7 @@ static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 	sector_t laddr = pblk_get_laddr(bio);
 	struct bio *ctx_bio = (bio->bi_rw & REQ_PREFLUSH) ? bio : NULL;
 	struct pblk_w_ctx w_ctx;
-	unsigned long pos;
+	unsigned long bpos;
 	unsigned int i;
 	int ret = (ctx_bio) ? NVM_IO_OK : NVM_IO_DONE;
 
@@ -850,7 +835,7 @@ static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 	 * write. The write in itself cannot fail, so there is no need to
 	 * rollback from here on.
 	 */
-	if (!pblk_rb_may_write(&pblk->rwb, nr_entries, nr_entries, &pos))
+	if (!pblk_rb_may_write(&pblk->rwb, nr_entries, nr_entries, &bpos))
 		return NVM_IO_REQUEUE;
 
 	w_ctx.bio = ctx_bio;
@@ -860,9 +845,21 @@ static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 	ppa_set_empty(&w_ctx.ppa.ppa);
 
 	for (i = 0; i < nr_entries; i++) {
+		void *data = bio_data(bio);
+		struct ppa_addr ppa;
+		unsigned long pos = bpos + i;
+
 		w_ctx.lba = laddr + i;
 
-		pblk_update_cache_map(pblk, bio, &w_ctx, pos + i, 1);
+		pblk_rb_write_entry(&pblk->rwb, data, w_ctx, pos);
+		ppa = pblk_cacheline_to_ppa(pblk_rb_wrap_pos(&pblk->rwb, pos));
+
+try:
+		if (pblk_update_map(pblk, w_ctx.lba, NULL, ppa, 1)) {
+			schedule();
+			goto try;
+		}
+
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 	}
 
@@ -874,16 +871,17 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 			     struct pblk_kref_buf *ref_buf,
 			     unsigned int nr_secs,
 			     unsigned int nr_rec_secs,
-			     unsigned long flags)
+			     unsigned long flags,
+			     struct pblk_block *gc_rblk)
 {
 	struct pblk_w_ctx w_ctx;
 	struct bio *ctx_bio = NULL;
-	unsigned long pos;
+	unsigned long bpos;
 	unsigned int i, valid_secs = 0;
 
 	BUG_ON(!bio_has_data(bio) || (nr_rec_secs != bio->bi_vcnt));
 
-	if (!pblk_setup_write_to_cache(pblk, bio, ctx_bio, &pos,
+	if (!pblk_setup_write_to_cache(pblk, bio, ctx_bio, &bpos,
 							nr_secs, nr_rec_secs))
 		return -1;
 
@@ -894,6 +892,10 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 	ppa_set_empty(&w_ctx.ppa.ppa);
 
 	for (i = 0, valid_secs = 0; i < nr_secs; i++) {
+		void *data = bio_data(bio);
+		struct ppa_addr ppa;
+		unsigned int pos = bpos + valid_secs;
+
 		if (lba_list[i] == ADDR_EMPTY)
 			continue;
 
@@ -904,7 +906,15 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 #endif
 		kref_get(&ref_buf->ref);
 
-		pblk_update_cache_map(pblk, bio, &w_ctx, pos + valid_secs, 0);
+		pblk_rb_write_entry(&pblk->rwb, data, w_ctx, pos);
+		ppa = pblk_cacheline_to_ppa(pblk_rb_wrap_pos(&pblk->rwb, pos));
+
+try:
+		if (pblk_update_map_gc(pblk, w_ctx.lba, NULL, ppa, gc_rblk)) {
+			schedule();
+			goto try;
+		}
+
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 		valid_secs++;
 	}
