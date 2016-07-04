@@ -491,13 +491,15 @@ static void gen_free(struct nvm_dev *dev)
 static ssize_t gen_sysfs_blocks(struct gen_dev *gn, char *page)
 {
 	int i;
-	unsigned int used = 0, free = 0, bb_list = 0, total_lun = 0;
+	unsigned int used, free, bb_list, total_lun;
 	unsigned int free_local;
 	struct list_head *n;
 	ssize_t offset = 0;
 
 	for (i = 0; i < gn->nr_luns; i++) {
 		struct gen_lun *lun = &gn->luns[i];
+
+		used = free = bb_list = total_lun = 0;
 
 		spin_lock(&lun->vlun.lock);
 		list_for_each(n, &lun->used_list)
@@ -514,7 +516,8 @@ static ssize_t gen_sysfs_blocks(struct gen_dev *gn, char *page)
 
 		total_lun = used + free+ bb_list;
 
-		offset = sprintf(page, "lun=(%i %i), used=%u, free=%u, bblist=%u, total=%u (vlun_free=%u)\n",
+		offset += sprintf(page + offset,
+				"lun=(%i %i), u=%u, f=%u, b=%u, t=%u (v=%u)\n",
 				lun->vlun.chnl_id, lun->vlun.lun_id,
 				used, free, bb_list, total_lun, free_local);
 	}
