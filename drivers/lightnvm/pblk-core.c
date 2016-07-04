@@ -649,9 +649,7 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 	wait_for_completion_io(&wait);
 
 	if (bio->bi_error) {
-		spin_lock_irq(&pblk->pblk_lock);
-		pblk->read_failed++;
-		spin_unlock_irq(&pblk->pblk_lock);
+		inc_stat(pblk, &pblk->read_failed);
 		pblk_print_failed_rqd(rqd, bio->bi_error);
 	}
 
@@ -842,7 +840,7 @@ void pblk_write_timer_fn(unsigned long data)
 
 int pblk_buffer_write(struct pblk *pblk, struct bio *bio, unsigned long flags)
 {
-	uint8_t nr_secs = pblk_get_secs(bio);
+	int nr_secs = pblk_get_secs(bio);
 	int ret = NVM_IO_DONE;
 
 	if (bio->bi_rw & REQ_PREFLUSH) {
@@ -866,6 +864,17 @@ retry:
 		goto retry;
 
 	pblk_may_submit_write(pblk, nr_secs);
+
+	spin_lock_irq(&pblk->lock);
+	pblk->write_cnt += nr_secs;
+	if (pblk->write_cnt > PBLK_KICK_SECTS) {
+		pblk->write_cnt -= PBLK_KICK_SECTS;
+		spin_unlock_irq(&pblk->lock);
+
+		pblk_write_kick(pblk);
+	} else
+		spin_unlock_irq(&pblk->lock);
+
 
 #ifdef CONFIG_NVM_DEBUG
 	atomic_add(nr_secs, &pblk->inflight_writes);
@@ -1036,9 +1045,7 @@ retry:
 		nvm_mark_blk(dev, ppa, NVM_BLK_ST_BAD);
 		pblk_retire_blk(pblk, rblk);
 
-		spin_lock_irq(&pblk->pblk_lock);
-		pblk->erase_failed++;
-		spin_unlock_irq(&pblk->pblk_lock);
+		inc_stat(pblk, &pblk->erase_failed);
 		print_ppa(&ppa, "erase", 0);
 		goto retry;
 	}
@@ -1350,9 +1357,7 @@ static void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd,
 		nvm_dev_dma_free(pblk->dev, rqd->meta_list, rqd->dma_meta_list);
 
 	if (bio->bi_error) {
-		spin_lock_irq(&pblk->pblk_lock);
-		pblk->read_failed++;
-		spin_unlock_irq(&pblk->pblk_lock);
+		inc_stat(pblk, &pblk->read_failed);
 		pblk_print_failed_rqd(rqd, bio->bi_error);
 	}
 
@@ -1382,21 +1387,6 @@ void pblk_end_io(struct nvm_rq *rqd)
 		pblk_end_io_read(pblk, rqd, nr_secs);
 	else
 		pblk_end_io_write(pblk, rqd);
-}
-
-int pblk_media_write(void *data)
-{
-	struct pblk *pblk = data;
-
-	while (1) {
-		if (unlikely(kthread_should_stop()))
-			break;
-
-		if (!pblk_submit_write(pblk))
-			io_schedule_timeout(msecs_to_jiffies(2));
-	}
-
-	return 0;
 }
 
 int pblk_update_map(struct pblk *pblk, sector_t laddr, struct pblk_block *rblk,
@@ -1661,7 +1651,7 @@ retry:
 		spin_lock(&rlun->lock_lists);
 		if (!list_empty(&rlun->open_list)) {
 			spin_unlock(&rlun->lock_lists);
-			schedule();
+			io_schedule();
 			goto retry;
 		}
 		spin_unlock(&rlun->lock_lists);

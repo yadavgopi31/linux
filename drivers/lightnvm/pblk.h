@@ -337,6 +337,10 @@ struct pblk {
 	unsigned int nr_blk_dsecs; /* Number of data sectors in block */
 	unsigned int blk_meta_size;
 
+	/* counter for pblk_write_kick */
+#define PBLK_KICK_SECTS 1024
+	int write_cnt;
+
 	/* Write strategy variables. Move these into each for structure for each
 	 * strategy
 	 */
@@ -360,7 +364,7 @@ struct pblk {
 	atomic_t requeued_writes;	/* Sectors requeued in cache */
 #endif
 
-	spinlock_t pblk_lock;
+	spinlock_t lock;
 	unsigned long read_failed;
 	unsigned long read_failed_gc;
 	unsigned long write_failed;
@@ -515,7 +519,7 @@ int pblk_update_map_gc(struct pblk *pblk, sector_t laddr,
 /* pblk write path */
 int pblk_buffer_write(struct pblk *pblk, struct bio *bio, unsigned long flags);
 int pblk_submit_write(struct pblk *pblk);
-int pblk_media_write(void *data);
+int pblk_write_ts(void *data);
 void pblk_write_timer_fn(unsigned long data);
 int pblk_setup_w_multi(struct pblk *pblk, struct nvm_rq *rqd,
 		       struct pblk_ctx *ctx, struct pblk_sec_meta *meta,
@@ -851,4 +855,10 @@ static inline int block_is_full(struct pblk *pblk, struct pblk_block *rblk)
 	return (rblk->cur_sec >= pblk->nr_blk_dsecs);
 }
 
+static inline void inc_stat(struct pblk *pblk, unsigned long *stat)
+{
+		spin_lock_irq(&pblk->lock);
+		(*stat)++;
+		spin_unlock_irq(&pblk->lock);
+}
 #endif /* PBLK_H_ */
