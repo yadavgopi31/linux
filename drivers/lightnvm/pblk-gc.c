@@ -595,10 +595,7 @@ int pblk_gc_init(struct pblk *pblk)
 
 	/* The write buffer has space for one block per active LUN on the
 	 * target. In emergency GC we need to be able to flush the whole buffer,
-	 * which in the worst case is full with user I/O. We leave 2 extra
-	 * blocks for emergency GC.
-	 *
-	 * JAVIER: Calculate this properly
+	 * which in the worst case is full with user I/O.
 	 */
 	pblk->gc_ths.emergency_luns = kzalloc(BITS_TO_LONGS(pblk->dev->nr_luns) *
 					sizeof(unsigned long), GFP_KERNEL);
