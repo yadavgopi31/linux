@@ -488,6 +488,65 @@ static void gen_free(struct nvm_dev *dev)
 	dev->mp = NULL;
 }
 
+static ssize_t gen_sysfs_blocks(struct gen_dev *gn, char *page)
+{
+	int i;
+	unsigned int used = 0, free = 0, bb_list = 0, total_lun = 0;
+	unsigned int free_local;
+	struct list_head *n;
+	ssize_t offset = 0;
+
+	for (i = 0; i < gn->nr_luns; i++) {
+		struct gen_lun *lun = &gn->luns[i];
+
+		spin_lock(&lun->vlun.lock);
+		list_for_each(n, &lun->used_list)
+			used++;
+
+		list_for_each(n, &lun->free_list)
+			free++;
+
+		list_for_each(n, &lun->bb_list)
+			bb_list++;
+
+		free_local = lun->vlun.nr_free_blocks;
+		spin_unlock(&lun->vlun.lock);
+
+		total_lun = used + free+ bb_list;
+
+		offset = sprintf(page, "lun=(%i %i), used=%u, free=%u, bblist=%u, total=%u (vlun_free=%u)\n",
+				lun->vlun.chnl_id, lun->vlun.lun_id,
+				used, free, bb_list, total_lun, free_local);
+	}
+
+	return offset;
+}
+
+static ssize_t gen_sysfs_show(struct device *dev,
+			      struct device_attribute *dattr, char *page)
+{
+	struct nvm_dev *ndev = container_of(dev, struct nvm_dev, dev);
+	struct gen_dev *gn = ndev->mp;
+	struct attribute *attr = &dattr->attr;
+
+	if (strcmp(attr->name, "blocks") == 0)
+		return gen_sysfs_blocks(gn, page);
+
+	return 0;
+}
+
+static DEVICE_ATTR(blocks, S_IRUGO, gen_sysfs_show, NULL);
+
+static struct attribute *gen_attrs[] = {
+	&dev_attr_blocks.attr,
+	NULL,
+};
+
+static struct attribute_group gen_attr_group = {
+	.name = "mediamgr",
+	.attrs = gen_attrs,
+};
+
 static int gen_register(struct nvm_dev *dev)
 {
 	struct gen_dev *gn;
@@ -519,6 +578,9 @@ static int gen_register(struct nvm_dev *dev)
 		goto err;
 	}
 
+	if (sysfs_create_group(&dev->dev.kobj, &gen_attr_group))
+		pr_warn("%s: failed to create sysfs group\n", dev->name);
+
 	return 1;
 err:
 	gen_free(dev);
@@ -538,6 +600,8 @@ static void gen_unregister(struct nvm_dev *dev)
 		__gen_remove_target(t);
 	}
 	mutex_unlock(&gn->lock);
+
+	sysfs_remove_group(&dev->dev.kobj, &gen_attr_group);
 
 	gen_free(dev);
 	module_put(THIS_MODULE);
