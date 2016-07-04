@@ -379,10 +379,8 @@ int pblk_submit_write(struct pblk *pblk)
 
 	/* Count available entries on rb, and lock reader */
 	secs_avail = pblk_rb_read_lock(&pblk->rwb);
-	if (!secs_avail) {
-		pblk_rb_read_unlock(&pblk->rwb);
+	if (!secs_avail)
 		goto fail_bio;
-	}
 
 	secs_to_flush = pblk_rb_sync_point_count(&pblk->rwb);
 	secs_to_sync = pblk_calc_secs_to_sync(pblk, secs_avail, secs_to_flush);
