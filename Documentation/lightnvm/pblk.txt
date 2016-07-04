@@ -1,4 +1,6 @@
+================================================================================
 pblk: Physical Block Device Target
+================================================================================
 
 pblk is a LightNVM target implementing a full host-side Flash Translation Layer
 (FTL). As a target, pblk presents itself as a make_request_fn base driver to the
@@ -24,7 +26,6 @@ At the moment, pblk implements the following functionality:
   6. Sysfs integration
   7. I/O rate-limiting ??
 
-
 1. Sector-based host-side translation table management
 ======================================================
 
@@ -34,29 +35,29 @@ At the moment, pblk implements the following functionality:
 
  2. Write Buffer
  ===============
- pblk operates around a ring write buffer of size N, where N is the closest
- power-of-2 size to the number of active LUNs in the target times the size of a
- flash block. 
+ pblk uses a ring write buffer of size N, where N is the power of two closest to
+ the product of the number of active LUNS and the flash block size.
 
- Apart from the performance benefit of buffering writes, this buffer allows to
- respect controller constrains on how flash pages must be written. Typically,
- flash pages are between 16KB and 32KB large, and the controller might introduce
- other abstractions that tight pages together (e.g., planes) and make "apparent"
- page sizes to be fairly large (e.g., 64KB, 128KB). These constrains must be
- respected when sending write I/Os to the controller.
+ Buffering facilitates sending writes to the controller in the size of and
+ aligned to a given flash page size. A useful facility since constraints by
+ controllers include writing aligned and at page granularity. Typically, flash
+ pages are between 16KB and 32KB large, and the controller might introduce other
+ abstractions that tie pages together (e.g., planes) and make the "apparent"
+ page size relatively large (e.g., 64KB, 128KB).
 
- Moreover, some flash media such as MLC flash are organized in page pairs (lower
- and upper pages), which must be written in order for a write to be guaranteed
- persistence. In order words, the data in the lower flash page cannot be read
- back until the upper flash page has been written. Therefore, even if data has
- been written, it must still reside in host until more data has been written. We
- refer to the number of sectors that must reside in the write buffer before it
- is safe to read from the media as the buffers "grace area". We describe below
- how we implement this grace area through a dedicated pointer on the write
- buffer. This problem only aggravates with more complex media such as TLC or
- QLC.
+ The flash media introduces additional constraints. Example, for a write to be
+ guaranteed persistence on MLC flash, then it must be written in page pairs
+ (lower and upper pages). Consequentially, the data in the lower flash page
+ cannot be read (safely) until a write to the upper flash page occurs.
+ Data must thus reside in the host until both writes are successful.
+ We refer to the number of sectors that must reside in the write buffer before
+ it is safe to read from the media as the buffers "grace area". We describe
+ below how we implement this grace area through a dedicated pointer on the
+ write buffer. This problem only aggravates with more complex media such as TLC
+ or QLC.
 
- By buffering writes, both controller- and media-specific constrains can be met.
+ Buffering writes are thus a means to meet both controller- and media-specific
+ constraints.
 
  Ring Write Buffer Design
  ------------------------
@@ -114,11 +115,12 @@ D: L2P points to device
 Write Path
 ----------
 On a new write, the bio associated to it is converted into a write context
-(pblk_w_ctx), where the logical address (lba), length and flush requirements are
-stored. The bio data is copied to the internal write buffer and completed if a
-flush is not required (in case of a flush, the bio is completed after all data
-on the write buffer has been persisted to the media). As data is stored on the
-write buffer, the translation table is updated so that lbas point to the buffer
+(pblk_w_ctx), where the logical block address (LBA), length and flush
+requirements are stored.
+The bio data is copied to the internal write buffer and completed if a flush is
+not required (in case of a flush, the bio is completed after all data on the
+write buffer has been persisted to the media). As data is stored on the write
+buffer, the translation table is updated so that LBAs point to the buffer
 entries data has been stored in.
 
 A separate write thread consumes user data from the write buffer and forms new
@@ -147,19 +149,27 @@ manually with them.
 
 3. Translation table recovery
 =============================
-The L2P translation table is maintained entirely on the host memory. The ratio
-is approximately 1GB of L2P per 1TB of flash. In order to recover the
-translation table in case of power failure, pblk maintains different levels of
-redundancy. Firstly, for each 4KB sector, the lba to ppa mapping is stored in
-the out-of-bound (OOB) area for that sector. Secondly, when a block is closed,
-the last page contains metadata on the block itself, including the lba - ppa
-mapping list, block status and counters. Thirdly, a L2P snapshot is stored on
-the media on shutdown. The first two methods allow to recover using different
-levels of scanning in case of a power failure. The last method is the typical
-case, when the host is powered down gracefully.
+The L2P translation table is maintained entirely in host memory. The ratio
+is approximately 1GB of L2P per 1TB of flash. Translation table recovery is
+considered for two scenarios:
 
-All three methods are based on top of the generic media manager... TODO
+ (1) Graceful system shutdown (WIP)
+ (2) Power failure
 
+In the case of a graceful system shutdown, a L2P snapshot is stored on media.
+
+When an L2P snapshot is not recoverable from media then pblk assumes that an
+unexpected system shutdown, such as a power failure, has occurred.
+In which case, pblk resorts to scanning the media and thereby reconstruct the
+table. Two levels of redundancy are maintained to facilitate reconstruction:
+
+  Firstly, for each 4KB sector, the LBA to physical page address (PPA) mapping
+  is stored in the out-of-bound (OOB) area for that sector.
+
+  Secondly, when a block is closed, the last page contains metadata on the block
+  itself, including the LBA - PPA mapping list, block status and counters.
+
+All recovery methods leverage functionality of the generic media manager... TODO
 
 4. Write Recovery
 =================
@@ -171,3 +181,4 @@ All three methods are based on top of the generic media manager... TODO
 ====================
 
 7. I/O rate-limiting ??
+====================
