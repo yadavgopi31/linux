@@ -33,78 +33,80 @@ integral part of the media manager and not a responsibility of pblk.
 1. Sector-based host-side translation table management
 ======================================================
 
- Mapping Strategy
- ----------------
+Mapping Strategy
+----------------
 
 
- 2. Write Buffer
- ===============
- pblk uses a ring write buffer of size N, where N is the power of two closest to
- the product of the number of active LUNS and the flash block size.
+2. Write Buffer
+===============
 
- Buffering facilitates sending writes to the controller in the size of and
- aligned to a given flash page size. A useful facility since constraints by
- controllers include writing aligned and at page granularity. Typically, flash
- pages are between 16KB and 32KB large, and the controller might introduce other
- abstractions that tie pages together (e.g., planes) and make the "apparent"
- page size relatively large (e.g., 64KB, 128KB).
+pblk uses a ring write buffer of size N, where N is the power of two closest to
+the product of the number of active LUNS and the flash block size.
 
- The flash media introduces additional constraints. Example, for a write to be
- guaranteed persistence on MLC flash, then it must be written in page pairs
- (lower and upper pages). Consequentially, the data in the lower flash page
- cannot be read safely until a write to the upper flash page occurs.
- Also, different types of media might require that, to safely read data once
- it is written to the media, a certain number of flash pages must be written to
- the same block. In MLC memories available today, this number is around eight
- pages. The consequence of these media restrictions is that data must thus
- remain cached in the host until media constraints can be satisfied.
+Buffering facilitates sending writes to the controller in the size of and
+aligned to a given flash page size. A useful facility since constraints by
+controllers include writing aligned and at page granularity. Typically, flash
+pages are between 16KB and 32KB large, and the controller might introduce other
+abstractions that tie pages together (e.g., planes) and make the "apparent"
+page size relatively large (e.g., 64KB, 128KB).
 
- We refer to the number of sectors that must reside in the write buffer before
- it is safe to read from the media as the buffers "grace area". We describe
- below how we implement this grace area through a dedicated pointer on the
- write buffer. Note that this problem only aggravates with more complex media
- such as TLC or QLC.
+The flash media introduces additional constraints. Example, for a write to be
+guaranteed persistence on MLC flash, then it must be written in page pairs
+(lower and upper pages). Consequentially, the data in the lower flash page
+cannot be read safely until a write to the upper flash page occurs.
+Also, different types of media might require that, to safely read data once
+it is written to the media, a certain number of flash pages must be written to
+the same block. In MLC memories available today, this number is around eight
+pages. The consequence of these media restrictions is that data must thus
+remain cached in the host until media constraints can be satisfied.
 
- Buffering writes are thus a means to meet both controller- and media-specific
- constraints.
+We refer to the number of sectors that must reside in the write buffer before
+it is safe to read from the media as the buffers "grace area". We describe
+below how we implement this grace area through a dedicated pointer on the
+write buffer. Note that this problem only aggravates with more complex media
+such as TLC or QLC.
 
- Ring Write Buffer Design
- ------------------------
- pblk's ring buffer is implemented as a ring buffer
- (See Documentation/circular-buffers.txt). However, the responsibilities of the
- producer and the consumer are split up into 2 extra pointers. This allows to
- implement the grace area mentioned above. With regards to locking, the buffer
- can be filled and emptied at the same time, but both producers and consumers
- are serialized. We describe each pointer separately:
+Buffering writes are thus a means to meet both controller- and media-specific
+constraints.
 
-   - Memory Pointer (mem): This is the head pointer (producer). It points to the
-     next writable entry on the buffer.
+Ring Write Buffer Design
+------------------------
 
-   - Submission Pointer (subm): This is the tail pointer (consumer). It points
-     to the next buffered entry that is ready to be submitted to the media.
-     The buffer count (number of valid elements in the buffer) is calculated
-     using mem and subm.
+pblk's ring buffer is implemented as a ring buffer
+(See Documentation/circular-buffers.txt). However, the responsibilities of the
+producer and the consumer are split up into 2 extra pointers. This allows to
+implement the grace area mentioned above. With regards to locking, the buffer
+can be filled and emptied at the same time, but both producers and consumers
+are serialized. We describe each pointer separately:
 
-   - Sync Pointer (sync): It signals the last submitted entry that has
-     completed; i.e., that has successfully been persisted to the media. It acts
-     as a backpointer that guarantees that I/Os are completed in order. This is
-     necessary to guarantee that flushes are completed correctly.
-     (See Documentation/block/writeback_cache_control.txt). The buffer space
-     (number of free entries on the buffer) is calculate between mem and sync.
+  - Memory Pointer (mem): This is the head pointer (producer). It points to the
+    next writable entry on the buffer.
 
-   - Flush Pointer (flush): It guarantees that flushes are respected by
-     signaling the last entry associated to a REQ_FLUSH request. This pointer is
-     taken into consideration by the write thread consuming the buffer (subm);
-     if this pointer is present, the write thread
+  - Submission Pointer (subm): This is the tail pointer (consumer). It points
+    to the next buffered entry that is ready to be submitted to the media.
+    The buffer count (number of valid elements in the buffer) is calculated
+    using mem and subm.
 
-   - Mapping Update Pointer (l2p_update): It guarantees that L2P lookups for
-     entries that still reside on the write buffer cache will point to it, even
-     if they have successfully been persisted to the media. By doing this we
-     guarantee that all entries residing in the write buffer will be read from
-     cache, thus preventing I/Os to be sent to the device to retrieve
-     half-written flash pages. This way, we ensure that the whole buffer defines
-     a grace area; the mapping table is only updated when the buffer head wraps
-     up.
+  - Sync Pointer (sync): It signals the last submitted entry that has
+    completed; i.e., that has successfully been persisted to the media. It acts
+    as a backpointer that guarantees that I/Os are completed in order. This is
+    necessary to guarantee that flushes are completed correctly.
+    (See Documentation/block/writeback_cache_control.txt). The buffer space
+    (number of free entries on the buffer) is calculate between mem and sync.
+
+  - Flush Pointer (flush): It guarantees that flushes are respected by
+    signaling the last entry associated to a REQ_FLUSH request. This pointer is
+    taken into consideration by the write thread consuming the buffer (subm);
+    if this pointer is present, the write thread
+
+  - Mapping Update Pointer (l2p_update): It guarantees that L2P lookups for
+    entries that still reside on the write buffer cache will point to it, even
+    if they have successfully been persisted to the media. By doing this we
+    guarantee that all entries residing in the write buffer will be read from
+    cache, thus preventing I/Os to be sent to the device to retrieve
+    half-written flash pages. This way, we ensure that the whole buffer defines
+    a grace area; the mapping table is only updated when the buffer head wraps
+    up.
 
 The write buffer is complemented with a write context buffer, which stores
 metadata for each 4KB write. (XXX: Mapping strategy) As mentioned above, we
@@ -131,6 +133,7 @@ D: L2P points to device
 
 Write Path
 ----------
+
 On a new write, the bio associated to it is converted into a write context
 (pblk_w_ctx), where the logical block address (LBA), length and flush
 requirements are stored. The bio data is copied to the internal write buffer and
@@ -183,6 +186,7 @@ following pattern:
 
 3. Provisioning
 ================
+
 As for today, LightNVM delegates block erases to the target. This means that
 when a target gets a new block, an erase is performed. If this operation takes
 place during LBA - PPA mapping on the write thread, latency spikes will occur.
@@ -203,6 +207,7 @@ simplifying target provisioning.
 
 4. Translation table recovery
 =============================
+
 The L2P translation table is maintained entirely in host memory. The ratio
 is approximately 1GB of L2P per 1TB of flash. Translation table recovery is
 considered for two scenarios:
@@ -217,16 +222,17 @@ unexpected system shutdown, such as a power failure, has occurred.
 In which case, pblk resorts to scanning the media and thereby reconstruct the
 table. Two levels of redundancy are maintained to facilitate reconstruction:
 
-  Firstly, for each 4KB sector, the LBA to physical page address (PPA) mapping
-  is stored in the out-of-bound (OOB) area for that sector.
+ Firstly, for each 4KB sector, the LBA to physical page address (PPA) mapping
+ is stored in the out-of-bound (OOB) area for that sector.
 
-  Secondly, when a block is closed, the last page contains metadata on the block
-  itself, including the LBA - PPA mapping list, block status and counters.
+ Secondly, when a block is closed, the last page contains metadata on the block
+ itself, including the LBA - PPA mapping list, block status and counters.
 
 All recovery methods leverage functionality of the generic media manager... TODO
 
 5. Write Recovery
 =================
+
 When writing to a flash page, the programming might fail. This can either
 happen because the page grew bad or because the whole block grew bad. When this
 happens, we follow a 3-step recovery process:
@@ -258,8 +264,11 @@ happens, we follow a 3-step recovery process:
 6. Garbage Collection
 =====================
 
+
 7. Sysfs integration
 ====================
 
+
 8. I/O rate-limiting ??
 ====================
+
