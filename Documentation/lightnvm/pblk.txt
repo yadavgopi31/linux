@@ -4,19 +4,18 @@ pblk: Physical Block Device Target
 
 pblk is a LightNVM target implementing a full host-side Flash Translation Layer
 (FTL). As a target, pblk presents itself as a make_request_fn base driver to the
-block layer. In this particular case, as a block device driver, which exposes
-the Open-Channel SSD storage device as a block storage to user space. In terms
-of target functionality, pblk implements everything related to data placement,
-garbage collection (GC) and recovery. In order to access the physical flash,
-pblk makes use of LightNVM's generic media manager, which exposes a get/put
-block provisioning interface.
+block layer. Specifically, as a block device driver, exposing the Open-Channel
+SSD storage device as block storage to user space.
 
-By design, pblk supports pluggable mapping and GC algorithms so that a single
-hardware device can be accommodated for specific workloads by simply making
-changes in software to the desired module (e.g., to the data stripping strategy
-in charge of mapping logical to physical addresses).
+Regarding functionality, pblk implements everything related to data placement,
+garbage collection (GC) and recovery.
 
-At the moment, pblk implements the following functionality:
+By design, pblk supports pluggable mapping and GC algorithms. A single hardware
+device can accommodate specific workloads by making changes in software to the
+desired module (e.g., to the data stripping strategy in charge of mapping
+logical to physical addresses).
+
+In its current state, pblk implements the following functionality:
 
   1. Sector-based host-side translation table management
   2. Write buffering for writing to physical flash pages
@@ -26,6 +25,10 @@ At the moment, pblk implements the following functionality:
   6. Simple cost-based garbage collector (GC)
   7. Sysfs integration
   8. I/O rate-limiting ??
+
+To access the physical flash pblk makes use of LightNVM's general media manager,
+which exposes a get/put block provisioning interface. Wear leveling is an
+integral part of the media manager and not a responsibility of pblk.
 
 1. Sector-based host-side translation table management
 ======================================================
@@ -49,12 +52,12 @@ At the moment, pblk implements the following functionality:
  The flash media introduces additional constraints. Example, for a write to be
  guaranteed persistence on MLC flash, then it must be written in page pairs
  (lower and upper pages). Consequentially, the data in the lower flash page
- cannot be read safely until a write to the upper flash page occurs. Also,
- different types of media might require that, in order to safely read data once
+ cannot be read safely until a write to the upper flash page occurs.
+ Also, different types of media might require that, to safely read data once
  it is written to the media, a certain number of flash pages must be written to
- the same block. In MLC memories available today, this nuber is around 8 pages.
- The consequence of these media restrictions is that data must thus remain
- cached in the host until media constrains are met.
+ the same block. In MLC memories available today, this number is around eight
+ pages. The consequence of these media restrictions is that data must thus
+ remain cached in the host until media constraints can be satisfied.
 
  We refer to the number of sectors that must reside in the write buffer before
  it is safe to read from the media as the buffers "grace area". We describe
@@ -182,7 +185,7 @@ following pattern:
 ================
 As for today, LightNVM delegates block erases to the target. This means that
 when a target gets a new block, an erase is performed. If this operation takes
-place during lba - ppa mapping on the write thread, latency spikes will occur.
+place during LBA - PPA mapping on the write thread, latency spikes will occur.
 Note that programming a flash page (write) takes around 1ms in conventional
 NAND. If dual or quad plane programming is supported by the controller, then up
 to 4 pages can be programmed in 1ms. On the other hand, erases take around 2-5
@@ -228,11 +231,11 @@ When writing to a flash page, the programming might fail. This can either
 happen because the page grew bad or because the whole block grew bad. When this
 happens, we follow a 3-step recovery process:
 
- (1) The 64-bit result field of the nvme command is checked to find which ppas
- failed. The block(s) corresponding with the failed ppas are marked as bad
- blocks. This means that they are retired and no new lbas will be mapped to
+ (1) The 64-bit result field of the nvme command is checked to find which PPAs
+ failed. The block(s) corresponding with the failed PPAs are marked as bad
+ blocks. This means that they are retired and no new LBAs will be mapped to
  them. After this, all entries before the first error can be completed. A new
- nvme command is issued with the left ppas and send immediately to the media.
+ nvme command is issued with the left PPAs and send immediately to the media.
  This is necessary since the backpointer on the write buffer (sync) will be
  waiting for buffer entries to be completed in order. This step will only take
  place once per grown bad block; (2) and (3) will take care of recovering the
@@ -242,7 +245,7 @@ happens, we follow a 3-step recovery process:
  as bad, extra mappings to that block might have occurred before the command was
  completed. In order not to paralyze the write buffer to clean these entries, we
  allow them to be submitted. Chances are that writes to a bad block fail. If so,
- we complete the entries before the failed ppa and resubmit the entries that are
+ we complete the entries before the failed PPA and resubmit the entries that are
  mapped to a non-bad block. The l2p pointer in the write buffer takes care of
  re-buffering entries associated with a bad block. Note that the backpointer
  guarantees that the l2p pointer will not miss any mapping. If writes to the
