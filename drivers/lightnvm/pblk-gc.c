@@ -299,6 +299,9 @@ int pblk_gc_move_valid_secs(struct pblk *pblk, struct pblk_block *rblk,
 	int off;
 	int moved = 0;
 
+	if (nr_entries == 0)
+		return 0;
+
 	alloc_entries = (nr_entries > max) ? max : nr_entries;
 	data = kmalloc(alloc_entries * dev->sec_size, GFP_KERNEL);
 	if (!data) {
@@ -452,7 +455,7 @@ next_lba_list:
 						pblk->nr_blk_dsecs, bit);
 		gc_lba_list[nr_ppas] = lba_list[bit];
 
-		if (bit > pblk->nr_blk_dsecs)
+		if (bit >= pblk->nr_blk_dsecs)
 			goto prepare_ppas;
 
 		nr_ppas++;
@@ -460,13 +463,6 @@ next_lba_list:
 	} while (nr_ppas < PBLK_MAX_REQ_ADDRS);
 
 prepare_ppas:
-	if (nr_ppas == 0) {
-#if CONFIG_NVM_DEBUG
-		BUG_ON(!bitmap_empty(rblk->invalid_bitmap, pblk->nr_blk_dsecs));
-#endif
-		goto put_block;
-	}
-
 	moved = pblk_gc_move_valid_secs(pblk, rblk, gc_lba_list, nr_ppas);
 	if (moved != nr_ppas) {
 		pr_err("pblk: could not GC all sectors:blk:%lu, GC:%d/%d/%d\n",
@@ -480,7 +476,12 @@ prepare_ppas:
 	if (total_moved < nr_valid_secs)
 		goto next_lba_list;
 
-put_block:
+#if CONFIG_NVM_DEBUG
+	BUG_ON(pblk->nr_blk_dsecs -
+		bitmap_weight(rblk->invalid_bitmap, pblk->nr_blk_dsecs) !=
+		total_moved);
+#endif
+
 	spin_lock(&rblk->lock);
 	pblk_put_blk(pblk, rblk);
 	spin_unlock(&rblk->lock);
