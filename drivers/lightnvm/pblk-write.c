@@ -175,7 +175,7 @@ int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 }
 
 static int pblk_replace_blk(struct pblk *pblk, struct pblk_block *rblk,
-			    struct pblk_lun *rlun, int is_bb)
+			    struct pblk_lun *rlun)
 {
 	rblk = pblk_blk_pool_get(pblk, rlun);
 	if (!rblk)
@@ -216,9 +216,8 @@ try_cur:
 
 	/* Account for grown bad blocks */
 	if (unlikely(block_is_bad(rblk))) {
-		if (!pblk_replace_blk(pblk, rblk, rlun, 1)) {
+		if (!pblk_replace_blk(pblk, rblk, rlun)) {
 			spin_unlock(&rlun->lock);
-			schedule();
 			goto try_lun;
 		}
 		goto try_cur;
@@ -227,9 +226,8 @@ try_cur:
 	ret = pblk_map_page(pblk, rblk, sentry, ppa_list, meta_list,
 							nr_secs, valid_secs);
 	if (ret) {
-		if (!pblk_replace_blk(pblk, rblk, rlun, 0)) {
+		if (!pblk_replace_blk(pblk, rblk, rlun)) {
 			spin_unlock(&rlun->lock);
-			schedule();
 			goto try_lun;
 		}
 		goto try_cur;
