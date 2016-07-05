@@ -48,37 +48,53 @@ At the moment, pblk implements the following functionality:
  The flash media introduces additional constraints. Example, for a write to be
  guaranteed persistence on MLC flash, then it must be written in page pairs
  (lower and upper pages). Consequentially, the data in the lower flash page
- cannot be read (safely) until a write to the upper flash page occurs.
- Data must thus reside in the host until both writes are successful.
+ cannot be read safely until a write to the upper flash page occurs. Also,
+ different types of media might require that, in order to safely read data from
+ the media, a certain number of flash pages are written in the same block. The
+ consequence is that data must thus remain cached in the host until media
+ constrains are met.
+ 
  We refer to the number of sectors that must reside in the write buffer before
  it is safe to read from the media as the buffers "grace area". We describe
  below how we implement this grace area through a dedicated pointer on the
  write buffer. This problem only aggravates with more complex media such as TLC
  or QLC.
 
+ As a rule of thumb, for a drive with 128 LUNs and average  MLC NAND, the write
+ buffer is around 64MBs.
+
  Buffering writes are thus a means to meet both controller- and media-specific
  constraints.
 
  Ring Write Buffer Design
  ------------------------
- Apart from the usual head (mem) and tail (subm) pointers, pblk's ring write
- buffer maintains a other pointers for different purposes. We describe each
- pointer separately:
+ pblk's ring buffer is implemented as a ring buffer
+ (See Documentation/circular-buffers.txt). However, the responsibilities of the
+ producer and the consumer are split up into 2 extra pointers. This allows to
+ implement the grace area mentioned above. The buffer can be filled and emptied
+ at the same time, but both producers and consumers are serialized. We describe
+ each pointer separately:
 
-   - Memory Pointer (mem): This is the head pointer. It points to the next
-     writable entry on the buffer.
-   - Submission Pointer (subm): This is the tail pointer. It points to the
-     next buffered entry that is ready to be submitted to the media. Buffer
-     space and count are calculated using mem and subm.
+   - Memory Pointer (mem): This is the head pointer (producer). It points to the
+     next writable entry on the buffer.
+
+   - Submission Pointer (subm): This is the tail pointer (consumer). It points
+     to the next buffered entry that is ready to be submitted to the media.
+     The buffer count (number of valid elements in the buffer) is calculated
+     using mem and subm.
+
    - Sync Pointer (sync): It signals the last submitted entry that has
-     completed; i.e., that has successfully been persisted to the media.
-     It acts as a backpointer that guarantees that I/Os are completed in
-     order. This is necessary to guarantee that flushes are completed
-     correctly (See Documentation/block/writeback_cache_control.txt).
-   - Flush Pointer (flush): It guarantees that flushes are respected
-     by signaling the last entry associated to a REQ_FLUSH request.
-     This pointer is taken into consideration by the write thread
-     consuming the buffer.
+     completed; i.e., that has successfully been persisted to the media. It acts
+     as a backpointer that guarantees that I/Os are completed in order. This is
+     necessary to guarantee that flushes are completed correctly.
+     (See Documentation/block/writeback_cache_control.txt). The buffer space
+     (number of free entries on the buffer) is calculate between mem and sync.
+
+   - Flush Pointer (flush): It guarantees that flushes are respected by
+     signaling the last entry associated to a REQ_FLUSH request. This pointer is
+     taken into consideration by the write thread consuming the buffer (subm);
+     if this pointer is present, the write thread
+
    - Mapping Update Pointer (l2p_update): It guarantees that L2P
      lookups for entries that still reside on the write buffer
      cache will point to it, even if they have successfully been
