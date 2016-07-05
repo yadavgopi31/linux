@@ -964,29 +964,38 @@ void pblk_retire_blk(struct pblk *pblk, struct pblk_block *rblk)
 	nvm_put_blk(pblk->dev, rblk->parent);
 }
 
-static struct pblk_blk_rec_lpg *pblk_alloc_blk_meta(struct pblk *pblk,
-						    u32 status)
+static void pblk_init_rlpg(struct pblk *pblk, struct pblk_block *rblk,
+			   struct pblk_blk_rec_lpg *rlpg)
+{
+	u64 *lbas = pblk_rlpg_to_llba(rlpg);
+	unsigned long *bitmaps;
+	int nr_entries = pblk->nr_blk_dsecs;
+
+	rblk->cur_sec = 0;
+	rblk->nr_invalid_secs = 0;
+	rblk->rlpg = rlpg;
+
+	bitmaps = (void *)(lbas + nr_entries);
+
+	rblk->sector_bitmap = bitmaps;
+	rblk->sync_bitmap = (rblk->sector_bitmap) + rlpg->bitmap_len;
+	rblk->invalid_bitmap = (rblk->sync_bitmap) + rlpg->bitmap_len;
+}
+
+struct pblk_blk_rec_lpg *pblk_alloc_blk_meta(struct pblk *pblk,
+					     struct pblk_block *rblk,
+					     u32 status)
 {
 	struct pblk_blk_rec_lpg *rlpg = NULL;
 	unsigned int rlpg_len, req_len, bitmap_len;
-	int nr_entries = pblk->nr_blk_dsecs;
-	int nr_bitmaps = 3; /* sector_bitmap, sync_bitmap, invalid_bitmap */
 
-	bitmap_len = BITS_TO_LONGS(nr_entries) * sizeof(unsigned long);
-	rlpg_len = sizeof(struct pblk_blk_rec_lpg) +
-			(nr_entries * sizeof(u64)) +
-			(nr_bitmaps * bitmap_len);
-	req_len = pblk->blk_meta_size;
-
-	if (rlpg_len > req_len) {
-		pr_err("pblk: metadata is too large for last page size\n");
+	if (pblk_recov_calc_meta_len(pblk, &bitmap_len, &rlpg_len, &req_len))
 		goto out;
-	}
 
 	rlpg = mempool_alloc(pblk->blk_meta_pool, GFP_KERNEL);
 	if (!rlpg)
 		goto out;
-	memset(rlpg, 0, pblk->blk_meta_size);
+	memset(rlpg, 0, req_len);
 
 	rlpg->status = status;
 	rlpg->rlpg_len = rlpg_len;
@@ -996,20 +1005,10 @@ static struct pblk_blk_rec_lpg *pblk_alloc_blk_meta(struct pblk *pblk,
 	rlpg->nr_lbas = 0;
 	rlpg->nr_padded = 0;
 
+	pblk_init_rlpg(pblk, rblk, rlpg);
+
 out:
 	return rlpg;
-}
-
-void pblk_init_blk_meta(struct pblk *pblk, struct pblk_block *rblk,
-			struct pblk_blk_rec_lpg *rlpg)
-{
-	int nr_entries = pblk->nr_blk_dsecs;
-
-	rblk->cur_sec = 0;
-	rblk->nr_invalid_secs = 0;
-	rblk->rlpg = rlpg;
-
-	pblk_rlpg_set_bitmaps(rlpg, rblk, nr_entries);
 }
 
 struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun)
@@ -1020,19 +1019,17 @@ struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun)
 	struct pblk_block *rblk;
 	struct pblk_blk_rec_lpg *rlpg;
 
-	rlpg = pblk_alloc_blk_meta(pblk, PBLK_BLK_ST_OPEN);
-	if (!rlpg)
-		return NULL;
-
 retry:
 	blk = nvm_get_blk(pblk->dev, lun);
 	if (!blk)
-		goto fail_free_rlpg;
+		return NULL;
 
 	rblk = pblk_get_rblk(rlun, blk->id);
 	blk->priv = rblk;
 
-	pblk_init_blk_meta(pblk, rblk, rlpg);
+	rlpg = pblk_alloc_blk_meta(pblk, rblk, PBLK_BLK_ST_OPEN);
+	if (!rlpg)
+		goto fail_put_blk;
 
 	/* TODO: For now, we erase blocks as we get them. The media manager will
 	 * do this when as part of the GC scheduler
@@ -1052,8 +1049,8 @@ retry:
 
 	return rblk;
 
-fail_free_rlpg:
-	mempool_free(rlpg, pblk->blk_meta_pool);
+fail_put_blk:
+	pblk_put_blk(pblk, rblk);
 	return NULL;
 }
 

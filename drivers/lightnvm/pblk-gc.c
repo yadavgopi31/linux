@@ -431,7 +431,7 @@ static void pblk_block_gc(struct work_struct *work)
 	if (!recov_page)
 		goto put_back;
 
-	if (pblk_recov_read(pblk, rblk, recov_page, page_size)) {
+	if (pblk_recov_read(pblk, rblk, recov_page)) {
 		pr_err("pblk: could not recover last page. Blk:%lu\n",
 						rblk->parent->id);
 		goto free_recov_page;

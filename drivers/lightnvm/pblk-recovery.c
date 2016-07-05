@@ -268,7 +268,7 @@ int pblk_recov_setup_rq(struct pblk *pblk, struct pblk_ctx *ctx,
 }
 
 int pblk_recov_read(struct pblk *pblk, struct pblk_block *rblk,
-		    void *recov_page, unsigned int page_size)
+		    void *recov_page)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct pblk_r_ctx *r_ctx;
@@ -276,6 +276,7 @@ int pblk_recov_read(struct pblk *pblk, struct pblk_block *rblk,
 	struct bio *bio;
 	struct ppa_addr ppa_addr[PBLK_RECOVERY_SECTORS];
 	u64 rppa;
+	unsigned int page_size = dev->sec_per_pl * dev->sec_size;
 	int i;
 	int ret = 0;
 	DECLARE_COMPLETION_ONSTACK(wait);
@@ -346,16 +347,34 @@ free_bio:
 	return ret;
 }
 
+int pblk_recov_calc_meta_len(struct pblk *pblk, unsigned int *bitmap_len,
+			     unsigned int *rlpg_len,
+			     unsigned int *req_len)
+{
+	int nr_entries = pblk->nr_blk_dsecs;
+
+	*bitmap_len = pblk->blk_meta.bitmap_len;
+	*req_len = pblk->blk_meta.rlpg_page_len;
+	*rlpg_len = sizeof(struct pblk_blk_rec_lpg) +
+			(nr_entries * sizeof(u64)) +
+			(PBLK_RECOVERY_BITMAPS * (*bitmap_len));
+
+	if (*rlpg_len > *req_len) {
+		pr_err("pblk: metadata is too large for last page size\n");
+		return 1;
+	}
+
+	return 0;
+}
+
 u64 *pblk_recov_get_lba_list(struct pblk *pblk, struct pblk_blk_rec_lpg *rlpg)
 {
-	u32 rlpg_len, bitmap_len;
+	u32 rlpg_len, req_len, bitmap_len;
 	u32 crc = ~(u32)0;
-	int nr_bitmaps = 3; /* sectors, sync, invalid */
 
-	bitmap_len = BITS_TO_LONGS(pblk->nr_blk_dsecs) * sizeof(unsigned long);
-	rlpg_len = sizeof(struct pblk_blk_rec_lpg) +
-			(pblk->nr_blk_dsecs * sizeof(u64)) +
-			(nr_bitmaps * bitmap_len);
+	if (pblk_recov_calc_meta_len(pblk, &bitmap_len, &rlpg_len, &req_len))
+		return NULL;
+
 	crc = cpu_to_le32(crc32_le(crc, (unsigned char *)rlpg + sizeof(crc),
 						rlpg_len - sizeof(crc)));
 
@@ -390,40 +409,32 @@ int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct pblk_lun *rlun = rblk->rlun;
-	struct pblk_blk_rec_lpg *recov_page;
+	struct pblk_blk_rec_lpg *rlpg;
 	struct ppa_addr ppa;
 	u64 *lba_list;
 	u64 bppa;
-	unsigned int page_size;
 	int i;
 	int ret = 0;
 
-	page_size = dev->sec_per_pl * dev->sec_size;
-	recov_page = mempool_alloc(pblk->blk_meta_pool, GFP_KERNEL);
-	if (!recov_page) {
+	rlpg = pblk_alloc_blk_meta(pblk, rblk, PBLK_BLK_ST_CLOSED);
+	if (!rlpg) {
 		pr_err("pblk: could not allocate recovery ppa list\n");
 		ret = -1;
 		goto out;
 	}
-	memset(recov_page, 0, pblk->blk_meta_size);
 
-	ret = pblk_recov_read(pblk, rblk, recov_page, page_size);
+	ret = pblk_recov_read(pblk, rblk, rlpg);
 	if (ret) {
 		pr_err("pblk: could not recover last page. Blk:%lu\n",
 						rblk->parent->id);
-		goto free_recov_page;
+		goto free_rlpg;
 	}
 
-	lba_list = pblk_recov_get_lba_list(pblk, recov_page);
+	lba_list = pblk_recov_get_lba_list(pblk, rlpg);
 	if (!lba_list)
-		goto free_recov_page;
+		goto free_rlpg;
 
-	/* TODO: We need gennvm to give us back the blocks that we owe so that
-	 * we can bring up the data structures before we populate them. For now
-	 * we scan all blocks on drive.
-	 */
-	pblk_init_blk_meta(pblk, rblk, recov_page);
-	pblk_recov_init(pblk, rblk, recov_page);
+	pblk_recov_init(pblk, rblk, rlpg);
 
 	/* For now, padded blocks are always closed on teardown */
 	spin_lock(&rlun->lock_lists);
@@ -446,8 +457,8 @@ int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk)
 
 	return ret;
 
-free_recov_page:
-	mempool_free(recov_page, pblk->blk_meta_pool);
+free_rlpg:
+	mempool_free(rlpg, pblk->blk_meta_pool);
 out:
 	return ret;
 }

@@ -218,7 +218,7 @@ static int pblk_core_init(struct pblk *pblk)
 		}
 
 		pblk_blk_meta_cache = kmem_cache_create("pblk_blk_m",
-				pblk->blk_meta_size, 0, 0, NULL);
+				pblk->blk_meta.rlpg_page_len, 0, 0, NULL);
 		if (!pblk_blk_meta_cache) {
 			kmem_cache_destroy(pblk_blk_ws_cache);
 			kmem_cache_destroy(pblk_rec_cache);
@@ -841,7 +841,9 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	pblk->poffset = dev->sec_per_lun * lun_begin;
 	pblk->lun_offset = lun_begin;
 
-	pblk->blk_meta_size = dev->sec_per_pl * dev->sec_size;
+	pblk->blk_meta.rlpg_page_len = dev->sec_per_pl * dev->sec_size;
+	pblk->blk_meta.bitmap_len =
+		BITS_TO_LONGS(pblk->nr_blk_dsecs) * sizeof(unsigned long);
 
 	ret = pblk_core_init(pblk);
 	if (ret) {

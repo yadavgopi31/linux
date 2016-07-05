@@ -201,6 +201,8 @@ struct pblk_rb {
 };
 
 #define PBLK_RECOVERY_SECTORS 4
+#define PBLK_RECOVERY_BITMAPS 3 /* sector_bitmap, sync_bitmap, invalid_bitmap */
+
 /*
  * Recovery stored in the last page of the block. A list of lbas (u64) is
  * allocated together with this structure to allow block recovery and GC.
@@ -218,6 +220,11 @@ struct pblk_blk_rec_lpg {
 	u32 cur_sec;
 	u32 nr_invalid_secs;
 	u32 bitmap_len;
+};
+
+struct pblk_blk_rec_lenghts {
+	u32 bitmap_len;
+	u32 rlpg_page_len;
 };
 
 struct pblk_block {
@@ -335,7 +342,7 @@ struct pblk {
 			    */
 
 	unsigned int nr_blk_dsecs; /* Number of data sectors in block */
-	unsigned int blk_meta_size;
+	struct pblk_blk_rec_lenghts blk_meta;
 
 	/* counter for pblk_write_kick */
 #define PBLK_KICK_SECTS 1024
@@ -483,8 +490,9 @@ void pblk_flush_writer(struct pblk *pblk);
 void pblk_discard(struct pblk *pblk, struct bio *bio);
 int pblk_alloc_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		    struct pblk_ctx *ctx, unsigned int nr_secs);
-void pblk_init_blk_meta(struct pblk *pblk, struct pblk_block *rblk,
-			struct pblk_blk_rec_lpg *rlpg);
+struct pblk_blk_rec_lpg *pblk_alloc_blk_meta(struct pblk *pblk,
+					     struct pblk_block *rblk,
+					     u32 status);
 void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk);
 void pblk_put_blk_unlocked(struct pblk *pblk, struct pblk_block *rblk);
 void pblk_end_io(struct nvm_rq *rqd);
@@ -496,7 +504,6 @@ void pblk_end_close_blk_bio(struct pblk *pblk, struct nvm_rq *rqd, int run_gc);
 void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk);
 void pblk_run_blk_ws(struct pblk *pblk, struct pblk_block *rblk,
 		     void (*work)(struct work_struct *));
-
 void pblk_write_kick_timer_fn(unsigned long data);
 int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 			     u64 *lba_list,
@@ -559,11 +566,14 @@ int pblk_recov_setup_rq(struct pblk *pblk, struct pblk_ctx *ctx,
 			struct pblk_rec_ctx *recovery, u64 *comp_bits,
 			unsigned int c_entries);
 int pblk_recov_read(struct pblk *pblk, struct pblk_block *rblk,
-		    void *recov_page, unsigned int page_size);
+		    void *recov_page);
 u64 *pblk_recov_get_lba_list(struct pblk *pblk, struct pblk_blk_rec_lpg *rlpg);
 int pblk_recov_scan_blk(struct pblk *pblk, struct pblk_block *rblk);
 void pblk_recov_clean_bb_list(struct pblk *pblk, struct pblk_lun *rlun);
 void pblk_close_blk(struct work_struct *work);
+int pblk_recov_calc_meta_len(struct pblk *pblk, unsigned int *bitmap_len,
+			  unsigned int *rlpg_len,
+			  unsigned int *req_len);
 
 /* pblk gc */
 #define PBLK_GC_TRIES 3
@@ -621,21 +631,6 @@ static inline void pblk_write_kick(struct pblk *pblk)
 static inline void *pblk_rlpg_to_llba(struct pblk_blk_rec_lpg *lpg)
 {
 	return lpg + 1;
-}
-
-static inline void pblk_rlpg_set_bitmaps(struct pblk_blk_rec_lpg *lpg,
-					 struct pblk_block *rblk,
-					 int nr_entries)
-{
-	u64 *lbas;
-	unsigned long *bitmaps;
-
-	lbas = pblk_rlpg_to_llba(lpg);
-	bitmaps = (void *)(lbas + nr_entries);
-
-	rblk->sector_bitmap = bitmaps;
-	rblk->sync_bitmap = rblk->sector_bitmap + lpg->bitmap_len;
-	rblk->invalid_bitmap = rblk->sync_bitmap + lpg->bitmap_len;
 }
 
 static inline struct pblk_ctx *pblk_set_ctx(struct pblk *pblk,
