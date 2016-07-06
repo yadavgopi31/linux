@@ -148,20 +148,8 @@ void *pblk_rb_entries_ref(struct pblk_rb *rb)
 	return rb->entries;
 }
 
-/* Copy write context metadata to buffer entry */
-static void memcpy_wctx(struct pblk_w_ctx *to, struct pblk_w_ctx *from)
-{
-	to->bio = from->bio;
-	to->lba = from->lba;
-	to->flags = from->flags;
-	to->ppa = from->ppa;
-	to->paddr = from->paddr;
-	to->priv = from->priv;
-}
-
 static void clean_wctx(struct pblk_w_ctx *w_ctx)
 {
-	/* memset(w_ctx, 0, sizeof(struct pblk_w_ctx)); */
 	w_ctx->flags = PBLK_WRITABLE_ENTRY;
 }
 
@@ -411,7 +399,13 @@ try:
 		goto try;
 
 	memcpy(entry->data, data, rb->seg_size);
-	memcpy_wctx(&entry->w_ctx, &w_ctx);
+
+	entry->w_ctx.bio = w_ctx.bio;
+	entry->w_ctx.lba = w_ctx.lba;
+	entry->w_ctx.ppa = w_ctx.ppa;
+	entry->w_ctx.paddr = w_ctx.paddr;
+	entry->w_ctx.priv = w_ctx.priv;
+	flags |= w_ctx.flags;
 
 	if (w_ctx.bio) {
 		/* Release pointer controlling flushes */
@@ -646,7 +640,7 @@ unsigned long pblk_rb_sync_advance(struct pblk_rb *rb, unsigned int nr_entries)
 		entry = &rb->entries[sync];
 		w_ctx = &entry->w_ctx;
 
-		if (unlikely(w_ctx->flags == PBLK_IOTYPE_REF)) {
+		if (w_ctx->flags & PBLK_IOTYPE_REF) {
 			struct pblk_kref_buf *ref_buf;
 
 			BUG_ON(!w_ctx->priv);
