@@ -116,6 +116,9 @@ static int pblk_gc_read_victim_blk(struct pblk *pblk, u64 *lba_list,
 
 	if (bio->bi_error) {
 		inc_stat(pblk, &pblk->read_failed_gc);
+		spin_lock_irq(&pblk->pblk_lock);
+		pblk->read_failed_gc++;
+		spin_unlock_irq(&pblk->pblk_lock);
 		pblk_print_failed_rqd(rqd, bio->bi_error);
 	}
 
@@ -421,11 +424,31 @@ static void pblk_block_gc(struct work_struct *work)
 	void *recov_page;
 	u64 *lba_list;
 	u64 gc_lba_list[PBLK_MAX_REQ_ADDRS];
+	unsigned long *invalid_bitmap;
 	unsigned int page_size = dev->sec_per_pl * dev->sec_size;
-	int nr_valid_secs = pblk->nr_blk_dsecs - rblk->nr_invalid_secs;
 	int moved, total_moved = 0;
+	int nr_invalid_secs;
+	int nr_valid_secs;
 	int bit;
 	int nr_ppas;
+
+	invalid_bitmap = kmalloc(BITS_TO_LONGS(pblk->nr_blk_dsecs) *
+				sizeof(unsigned long), GFP_KERNEL);
+	if (!invalid_bitmap) {
+		pr_err("pblk: could not allocate GC bitmap\n");
+		return;
+	}
+
+	spin_lock(&rblk->lock);
+	nr_invalid_secs = rblk->nr_invalid_secs;
+	nr_valid_secs = pblk->nr_blk_dsecs - rblk->nr_invalid_secs;
+	bitmap_copy(invalid_bitmap, rblk->invalid_bitmap, pblk->nr_blk_dsecs);
+	spin_unlock(&rblk->lock);
+
+#if CONFIG_NVM_DEBUG
+	BUG_ON(nr_valid_secs !=
+	pblk->nr_blk_dsecs - bitmap_weight(invalid_bitmap, pblk->nr_blk_dsecs));
+#endif
 
 	mempool_free(blk_ws, pblk->blk_ws_pool);
 	pr_debug("pblk: block '%lu' being reclaimed\n", rblk->parent->id);
@@ -447,19 +470,18 @@ static void pblk_block_gc(struct work_struct *work)
 		goto free_recov_page;
 	}
 
-	bit = 0;
+	bit = -1;
 next_lba_list:
 	nr_ppas = 0;
 	do {
-		bit = find_next_zero_bit(rblk->invalid_bitmap,
-						pblk->nr_blk_dsecs, bit);
+		bit = find_next_zero_bit(invalid_bitmap,
+						pblk->nr_blk_dsecs, bit + 1);
 		gc_lba_list[nr_ppas] = lba_list[bit];
 
 		if (bit >= pblk->nr_blk_dsecs)
 			goto prepare_ppas;
 
 		nr_ppas++;
-		bit++;
 	} while (nr_ppas < PBLK_MAX_REQ_ADDRS);
 
 prepare_ppas:
@@ -478,7 +500,7 @@ prepare_ppas:
 
 #if CONFIG_NVM_DEBUG
 	BUG_ON(pblk->nr_blk_dsecs -
-		bitmap_weight(rblk->invalid_bitmap, pblk->nr_blk_dsecs) !=
+		bitmap_weight(invalid_bitmap, pblk->nr_blk_dsecs) !=
 		total_moved);
 #endif
 
@@ -488,6 +510,7 @@ prepare_ppas:
 
 	pblk_gc_check_emergency_out(pblk, rlun);
 
+	kfree(invalid_bitmap);
 	kfree(recov_page);
 	return;
 
@@ -497,6 +520,8 @@ put_back:
 	spin_lock(&rlun->lock);
 	list_add_tail(&rblk->prio, &rlun->prio_list);
 	spin_unlock(&rlun->lock);
+
+	kfree(invalid_bitmap);
 }
 
 static void pblk_lun_gc(struct pblk *pblk, struct pblk_lun *rlun)

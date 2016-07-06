@@ -929,8 +929,11 @@ static void pblk_page_invalidate(struct pblk *pblk, struct pblk_addr *a)
 #endif
 
 	block_ppa = pblk_gaddr_to_pg_offset(pblk->dev, a->ppa);
+
+	spin_lock(&rblk->lock);
 	WARN_ON(test_and_set_bit(block_ppa, rblk->invalid_bitmap));
 	rblk->nr_invalid_secs++;
+	spin_unlock(&rblk->lock);
 }
 
 static void pblk_invalidate_range(struct pblk *pblk, sector_t slba,

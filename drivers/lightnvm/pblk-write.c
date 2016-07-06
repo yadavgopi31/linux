@@ -94,8 +94,12 @@ out:
 static void pblk_page_pad_invalidate(struct pblk *pblk, struct pblk_block *rblk,
 				     struct ppa_addr a)
 {
-	rblk->nr_invalid_secs++;
+#ifdef CONFIG_NVM_DEBUG
+	lockdep_assert_held(&rblk->lock);
+#endif
+
 	WARN_ON(test_and_set_bit(a.ppa, rblk->invalid_bitmap));
+	rblk->nr_invalid_secs++;
 
 	WARN_ON(test_and_set_bit(a.ppa, rblk->sync_bitmap));
 	if (bitmap_full(rblk->sync_bitmap, pblk->nr_blk_dsecs))
