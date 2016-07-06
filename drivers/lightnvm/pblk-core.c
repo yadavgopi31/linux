@@ -831,9 +831,12 @@ void pblk_write_timer_fn(unsigned long data)
 {
 	struct pblk *pblk = (struct pblk *)data;
 
-	/* Kick write thread if waiting */
+	/* Kick write queue if waiting */
 	if (waitqueue_active(&pblk->wait))
 		wake_up_nr(&pblk->wait, 1);
+
+	/* kick the write thread every tick to flush outstanding data */
+	pblk_write_kick(pblk);
 
 	mod_timer(&pblk->wtimer, jiffies + msecs_to_jiffies(1000));
 }

@@ -351,9 +351,9 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 	/* 1:1 mapping */
 	for (i = 0; i < pblk->nr_luns; i++) {
 		/* Align lun list to the channel each lun belongs to */
-		int ch =  ((lun_begin + i) % dev->nr_chnls);
-		int lun_raw =  ((lun_begin + i) / dev->nr_chnls);
-		int lunid =  lun_raw + ch * dev->luns_per_chnl;
+		int ch = (lun_begin + i) % dev->nr_chnls;
+		int lun_raw = (lun_begin + i) / dev->nr_chnls;
+		int lunid = lun_raw + ch * dev->luns_per_chnl;
 		struct nvm_lun *lun;
 
 		if (dev->mt->reserve_lun(dev, lunid)) {
@@ -390,7 +390,6 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 		INIT_LIST_HEAD(&rlun->open_list);
 		INIT_LIST_HEAD(&rlun->closed_list);
 		INIT_LIST_HEAD(&rlun->bb_list);
-
 
 		spin_lock_init(&rlun->lock);
 		spin_lock_init(&rlun->lock_lists);
@@ -484,7 +483,7 @@ static sector_t pblk_capacity(void *private)
 
 	/* cur, gc, and two emergency blocks for each lun */
 	reserved = pblk->nr_luns * dev->sec_per_blk * 4;
-	provisioned = pblk->nr_secs - reserved;
+	provisioned = pblk->capacity - reserved;
 
 	if (reserved > pblk->nr_secs) {
 		pr_err("pblk: not enough space available to expose storage.\n");
@@ -515,6 +514,9 @@ static int pblk_blocks_init(struct pblk *pblk)
 			rblk->b_lin_ppa = block_to_addr(pblk, rblk);
 			rblk->b_gen_ppa =
 				pblk_ppa_to_gaddr(pblk->dev, rblk->b_lin_ppa);
+
+			if (!rblk->parent->state)
+				pblk->capacity += pblk->dev->sec_per_blk;
 
 #ifndef CONFIG_NVM_PBLK_NO_RECOV
 			ret = pblk_recov_scan_blk(pblk, rblk);

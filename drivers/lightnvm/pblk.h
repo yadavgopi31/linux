@@ -348,6 +348,9 @@ struct pblk {
 #define PBLK_KICK_SECTS 1024
 	int write_cnt;
 
+	/* capacity of devices when bad blocks are subtracted */
+	sector_t capacity;
+
 	/* Write strategy variables. Move these into each for structure for each
 	 * strategy
 	 */

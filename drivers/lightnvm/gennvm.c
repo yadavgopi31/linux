@@ -360,6 +360,7 @@ static int gen_block_bb(struct gen_dev *gn, struct ppa_addr ppa,
 
 		blk = &lun->vlun.blocks[i];
 		list_move_tail(&blk->list, &lun->bb_list);
+		blk->state = NVM_BLK_ST_BAD;
 		lun->vlun.nr_free_blocks--;
 	}
 
