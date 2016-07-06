@@ -367,12 +367,12 @@ int pblk_submit_write(struct pblk *pblk)
 	secs_to_flush = pblk_rb_sync_point_count(&pblk->rwb);
 	count = pblk_rb_count(&pblk->rwb);
 	if (!secs_to_flush && count < pblk->max_write_pgs)
-		return 1;
+		return 0;
 
 	rqd = pblk_alloc_rqd(pblk, WRITE);
 	if (IS_ERR(rqd)) {
 		pr_err("pblk: not able to create write req.\n");
-		return 1;
+		return 0;
 	}
 	ctx = pblk_set_ctx(pblk, rqd);
 	c_ctx = ctx->c_ctx;
@@ -434,7 +434,7 @@ int pblk_submit_write(struct pblk *pblk)
 #ifdef CONFIG_NVM_DEBUG
 	atomic_add(secs_to_sync, &pblk->sub_writes);
 #endif
-	return 0;
+	return 1;
 fail_free_bio:
 	if (c_ctx->nr_padded)
 		pblk_bio_free_pages(pblk, bio, secs_to_sync, c_ctx->nr_padded);
@@ -448,19 +448,7 @@ fail_bio:
 fail_rqd:
 	pblk_free_rqd(pblk, rqd, WRITE);
 
-	return 1;
-}
-
-int pblk_write_ts(void *data)
-{
-	struct pblk *pblk = data;
-
-	while (!kthread_should_stop()) {
-		if (!pblk_submit_write(pblk))
-			continue;
-		set_current_state(TASK_INTERRUPTIBLE);
-		io_schedule();
-	}
-
 	return 0;
 }
+
+
