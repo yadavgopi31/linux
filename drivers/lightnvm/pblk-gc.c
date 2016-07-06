@@ -95,9 +95,6 @@ static int pblk_gc_read_victim_blk(struct pblk *pblk, u64 *lba_list,
 
 	if (bio->bi_error) {
 		inc_stat(pblk, &pblk->read_failed_gc);
-		spin_lock_irq(&pblk->pblk_lock);
-		pblk->read_failed_gc++;
-		spin_unlock_irq(&pblk->pblk_lock);
 		pblk_print_failed_rqd(rqd, bio->bi_error);
 	}
 
