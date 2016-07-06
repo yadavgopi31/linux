@@ -568,11 +568,11 @@ static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *page)
 {
 	ssize_t offset;
 
-	spin_lock_irq(&pblk->pblk_lock);
+	spin_lock_irq(&pblk->lock);
 	offset = sprintf(page, "read_failed=%lu, read_failed_gc=%lu, write_failed=%lu, erase_failed=%lu\n",
 				pblk->read_failed, pblk->read_failed_gc,
 				pblk->write_failed, pblk->erase_failed);
-	spin_unlock_irq(&pblk->pblk_lock);
+	spin_unlock_irq(&pblk->lock);
 
 	return offset;
 }
@@ -796,11 +796,10 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	bio_list_init(&pblk->requeue_bios);
 	spin_lock_init(&pblk->bio_lock);
 	spin_lock_init(&pblk->trans_lock);
-	spin_lock_init(&pblk->pblk_lock);
+	spin_lock_init(&pblk->lock);
 	INIT_WORK(&pblk->ws_requeue, pblk_requeue);
 	INIT_WORK(&pblk->ws_gc, pblk_gc);
-	pblk->ts_writer = kthread_create(pblk_media_write, pblk,
-								"pblk-writer");
+	pblk->ts_writer = kthread_create(pblk_write_ts, pblk, "pblk-writer");
 
 	pblk->nr_luns = lun_end - lun_begin + 1;
 
