@@ -34,7 +34,6 @@ static void pblk_gc_setup_rq(struct pblk *pblk, struct pblk_block *rblk,
 			     u64 *lba_list, unsigned int secs_to_gc, int off,
 			     unsigned int *ignored)
 {
-	struct pblk_addr *gp;
 	u64 lba;
 	int i;
 
@@ -51,26 +50,6 @@ static void pblk_gc_setup_rq(struct pblk *pblk, struct pblk_block *rblk,
 #ifdef CONFIG_NVM_DEBUG
 	BUG_ON(!(lba >= 0 && lba < pblk->nr_secs));
 #endif
-
-		/* If the lba is mapped to a different block, it means that it
-		 * has been updated and there is no need to move it to a
-		 * different block.
-		 *
-		 * The same applies for an entry in cache; the backpointer takes
-		 * care of requeuing entries mapped to a bad block. This is to
-		 * avoid double GC when doing recovery.
-		 */
-		spin_lock(&pblk->trans_lock);
-		gp = &pblk->trans_map[lba];
-
-		if (nvm_addr_in_cache(gp->ppa) ||
-				(gp->rblk->parent->id != rblk->parent->id)) {
-			lba_list[i + off] = ADDR_EMPTY;
-			(*ignored)++;
-			spin_unlock(&pblk->trans_lock);
-			continue;
-		}
-		spin_unlock(&pblk->trans_lock);
 	}
 }
 

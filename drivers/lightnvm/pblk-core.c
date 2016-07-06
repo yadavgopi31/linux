@@ -1430,7 +1430,6 @@ int pblk_update_map_gc(struct pblk *pblk, sector_t laddr,
 		       struct pblk_block *gc_rblk)
 {
 	struct pblk_addr *gp;
-	int map_is_gc;
 	int ret = 0;
 
 	BUG_ON(laddr >= pblk->nr_secs);
@@ -1439,8 +1438,7 @@ int pblk_update_map_gc(struct pblk *pblk, sector_t laddr,
 	gp = &pblk->trans_map[laddr];
 
 	/* Prevent updated entries to be overwritten by GC */
-	map_is_gc = gc_rblk != gp->rblk;
-	if (gp->rblk && map_is_gc)
+	if (gp->rblk && gc_rblk->parent->id != gp->rblk->parent->id)
 		goto out;
 
 	gp->ppa = ppa;
