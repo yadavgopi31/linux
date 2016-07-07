@@ -290,6 +290,24 @@ programming fails, we follow a 3-step recovery process:
 6. Garbage Collection
 =====================
 
+As a LightNVM target implementing a block device FTL, garbage collection is
+required. This is because LBA - PPA mapping is purely based on incoming user
+I/Os, not on data type, hotness, or any other characteristic that would allow to
+map flash blocks to application data structures.
+
+pblk implements a simple cost-based garbage collection algorithm. When the
+number of free blocks on the LUN go below a certain threshold, GC kicks off: it
+selects a victim block based on the invalid page counter and it moves all valid
+sectors back on the write buffer to be assigned a new PPA. The victim block is
+then put back to the media manager.
+
+In the beginning, GC has no preference over user I/Os; both compete for the
+write buffer. However, as less blocks become available, the GC rate-limits user
+I/O to guarantee that it will have enough blocks. An extreme is that the GC
+enters in an emergency mode. In this case, user I/O is stopped until a certain
+number of free blocks are available to the target again.
+
+OVERPROVISIONING??
 
 7. Sysfs integration
 ====================
