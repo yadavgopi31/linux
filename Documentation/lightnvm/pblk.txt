@@ -38,6 +38,24 @@ integral part of the media manager and not a responsibility of pblk.
 Mapping Strategy
 ----------------
 
+In pblk, we follow a late-mapping approach. This means that for incoming I/Os,
+LBAs are not immediately mapped to its PPA. Instead, the mapping occurs when
+data is going to be written to the media. This allows us to (i) enable user
+I/O rating without breaking the actual mapping strategy; (ii) simplify requeues;
+and (iii) use the same mapping for user I/O and garbage collection. As we will
+described in Section 1.2, data is written to a write buffer to start with.
+Mapping occurs on the write thread moving date from the buffer to the media.
+
+In terms of the actual mapping strategy, pblk's simplest version is based on
+round robin. Here, data is stripped across all active LUNs in the target
+instance for each 4KB of data. In the event of unbalanced LUN usage due to GC
+(Section 6), we prioritize less used LUNs. Note that wear-leveling is the media
+manager's responsibility; pblk uses the get block interface for provisioning by
+specifying the LUN that the new block should come from. The actual block is
+chosen by the media manager.
+
+Since data placement is entirely implemented in the host, pblk allows for other
+mapping strategies. This enables mapping optimizations for different workloads.
 
 2. Write Buffer
 ===============
@@ -113,11 +131,10 @@ separately:
     up.
 
 The write buffer is complemented with a write context buffer, which stores
-metadata for each 4KB write. (XXX: Mapping strategy) As mentioned above, we
-follow a late-map approach, where the actual mapping to flash pages is done when
-the write buffer is being written to the media. This allows us to decouple the
-mapping strategy from buffer writes, thus enabling mapping optimizations for
-different workloads.
+metadata for each 4KB write. As described in Section 1, we follow a late-map
+approach, where the actual mapping to flash pages is done when the write buffer
+is being persisted to the media. This allows us to decouple the mapping strategy
+from buffer writes, thus enabling mapping optimizations for different workloads.
 
 To minimize calculations, pblk's write buffer must be of a power-of-2 size...
 also write that it is the closes one to the number of active LUNs in the target
