@@ -32,6 +32,7 @@ To access the physical flash pblk makes use of LightNVM's general media manager,
 which exposes a get/put block provisioning interface. Wear leveling is an
 integral part of the media manager and not a responsibility of pblk.
 
+
 1. Sector-based host-side translation table management
 ======================================================
 
@@ -56,6 +57,7 @@ chosen by the media manager.
 
 Since data placement is entirely implemented in the host, pblk allows for other
 mapping strategies. This enables mapping optimizations for different workloads.
+
 
 2. Write Buffer
 ===============
@@ -151,7 +153,6 @@ X the size of a flash block.
 C: L2P points to cache
 D: L2P points to device
 
-
 Write Path
 ----------
 
@@ -179,6 +180,7 @@ with this case.
 
 Read Path
 ---------
+
 The read path is simpler than the write path. For each 4KB sector on the read
 bio, a lookup is performed to find if data is cached in the write buffer or if
 it is necessary to submit an I/O to retrieve it from the physical flash. It
@@ -252,6 +254,7 @@ table. Two levels of redundancy are maintained to facilitate reconstruction:
 
 All recovery methods leverage functionality of the generic media manager... TODO
 
+
 5. Write Recovery
 =================
 
@@ -282,6 +285,7 @@ programming fails, we follow a 3-step recovery process:
 
  (3) Finally, all pages that have successfully been mapped to a bad block are
  garbage collected. See Garbage Collection (Section 6).
+
 
 6. Garbage Collection
 =====================
