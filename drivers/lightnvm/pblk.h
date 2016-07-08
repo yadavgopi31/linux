@@ -596,7 +596,7 @@ void pblk_gc_kick(struct pblk *pblk);
 ssize_t pblk_rb_sysfs(struct pblk_rb *rb, char *buf);
 #endif
 
-void pblk_print_failed_rqd(struct nvm_rq *rqd, int error);
+void pblk_print_failed_rqd(struct pblk *pblk, struct nvm_rq *rqd, int error);
 
 static inline int nvm_addr_in_cache(struct ppa_addr gp)
 {

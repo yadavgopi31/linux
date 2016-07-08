@@ -63,22 +63,22 @@ static inline void print_ppa(struct ppa_addr *p, char *msg, int error)
 		p->g.ch, p->g.pl, p->g.lun, p->g.blk, p->g.pg, p->g.sec);
 }
 
-void pblk_print_failed_rqd(struct nvm_rq *rqd, int error)
+void pblk_print_failed_rqd(struct pblk *pblk, struct nvm_rq *rqd, int error)
 {
 	int offset = -1;
-	struct ppa_addr *p;
+	struct ppa_addr p;
 
 	if (rqd->nr_ppas ==  1) {
-		p = &rqd->ppa_addr;
-		print_ppa(p, "rqd", error);
+		p = dev_to_generic_addr(pblk->dev, rqd->ppa_addr);
+		print_ppa(&p, "rqd", error);
 		return;
 	}
 
 	while ((offset =
 		find_next_bit((void *)&rqd->ppa_status, rqd->nr_ppas,
 						offset + 1)) < rqd->nr_ppas) {
-		p = &rqd->ppa_list[offset];
-		print_ppa(p, "rqd", error);
+		p = dev_to_generic_addr(pblk->dev, rqd->ppa_list[offset]);
+		print_ppa(&p, "rqd", error);
 	}
 }
 
@@ -650,7 +650,7 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 
 	if (bio->bi_error) {
 		inc_stat(pblk, &pblk->read_failed);
-		pblk_print_failed_rqd(rqd, bio->bi_error);
+		pblk_print_failed_rqd(pblk, rqd, bio->bi_error);
 	}
 
 	if (unlikely(nr_secs > 1 && nr_holes == 1)) {
@@ -1361,7 +1361,7 @@ static void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd,
 
 	if (bio->bi_error) {
 		inc_stat(pblk, &pblk->read_failed);
-		pblk_print_failed_rqd(rqd, bio->bi_error);
+		pblk_print_failed_rqd(pblk, rqd, bio->bi_error);
 	}
 
 	bio_put(bio);

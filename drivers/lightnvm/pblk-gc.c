@@ -95,7 +95,7 @@ static int pblk_gc_read_victim_blk(struct pblk *pblk, u64 *lba_list,
 
 	if (bio->bi_error) {
 		inc_stat(pblk, &pblk->read_failed_gc);
-		pblk_print_failed_rqd(rqd, bio->bi_error);
+		pblk_print_failed_rqd(pblk, rqd, bio->bi_error);
 	}
 
 #ifdef CONFIG_NVM_DEBUG
