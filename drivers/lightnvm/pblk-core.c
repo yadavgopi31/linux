@@ -106,7 +106,7 @@ static bool atomic_inc_below(atomic_t *v, int below, int inc)
 
 static inline bool __pblk_may_submit_write(struct pblk *pblk, int nr_secs)
 {
-	return atomic_inc_below(&pblk->write_inflight, 400000, nr_secs);
+	return atomic_inc_below(&pblk->write_inflight, pblk->write_cur_speed, nr_secs);
 }
 
 void pblk_may_submit_write(struct pblk *pblk, int nr_secs)
@@ -827,6 +827,35 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 	return NVM_IO_OK;
 }
 
+static void pblk_write_user_update(struct pblk *pblk)
+{
+	int i;
+	unsigned int avail = 0;
+	struct nvm_lun *lun;
+	int high, low;
+
+	for (i = 0; i < pblk->nr_luns; i++) {
+		lun = pblk->luns[i].parent;
+		spin_lock(&lun->lock);
+		avail += lun->nr_free_blocks;
+		spin_unlock(&lun->lock);
+	}
+
+	high = pblk->total_blocks / PBLK_USER_HIGH_THRS;
+	low = pblk->total_blocks / PBLK_USER_LOW_THRS;
+
+	if (avail > high)
+		pblk->write_cur_speed = PBLK_USER_MAX_SPEED;
+	else if (avail > low && avail < high)
+	{
+		/* redo to power of two calculations */
+		int perc = ((avail * 100)) / (high - low);
+		pblk->write_cur_speed = (PBLK_USER_MAX_SPEED / 100) * perc;
+	} else {
+		pblk->write_cur_speed = 0;
+	}
+}
+
 void pblk_write_timer_fn(unsigned long data)
 {
 	struct pblk *pblk = (struct pblk *)data;
@@ -837,6 +866,9 @@ void pblk_write_timer_fn(unsigned long data)
 
 	/* kick the write thread every tick to flush outstanding data */
 	pblk_write_kick(pblk);
+
+	/* write user speed calc */
+	pblk_write_user_update(pblk);
 
 	mod_timer(&pblk->wtimer, jiffies + msecs_to_jiffies(1000));
 }

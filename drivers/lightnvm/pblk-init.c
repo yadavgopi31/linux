@@ -579,6 +579,34 @@ static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *page)
 	return offset;
 }
 
+/* merge with pblk_write_user_update the one in pblk_core */
+static unsigned int pblk_get_avail_blks(struct pblk *pblk)
+{
+	int i;
+	unsigned int avail = 0;
+	struct nvm_lun *lun;
+
+	for (i = 0; i < pblk->nr_luns; i++) {
+		lun = pblk->luns[i].parent;
+		spin_lock(&lun->lock);
+		avail += lun->nr_free_blocks;
+		spin_unlock(&lun->lock);
+	}
+
+	return avail;
+}
+
+static ssize_t pblk_sysfs_write_max(struct pblk *pblk, char *page)
+{
+	unsigned int avail = pblk_get_avail_blks(pblk);
+
+	return sprintf(page, "%uKBs (max:%dKBs, stop:<%lu, fullspd:>%lu, avail:%u)\n",
+				pblk->write_cur_speed*4, PBLK_USER_MAX_SPEED*4,
+				pblk->total_blocks / PBLK_USER_LOW_THRS,
+				pblk->total_blocks / PBLK_USER_HIGH_THRS,
+				avail);
+}
+
 static ssize_t pblk_sysfs_inflight_writes(struct pblk *pblk, char *buf)
 {
 	return sprintf(buf, "%u\n", atomic_read(&pblk->write_inflight));
@@ -667,6 +695,11 @@ static ssize_t pblk_sysfs_write_buffer(struct pblk *pblk, char *buf)
 }
 #endif
 
+static struct attribute sys_write_max_attr = {
+	.name = "write_max",
+	.mode = S_IRUGO
+};
+
 static struct attribute sys_stats_attr = {
 	.name = "stats",
 	.mode = S_IRUGO
@@ -700,6 +733,7 @@ static struct attribute sys_rb_attr = {
 #endif
 
 static struct attribute *pblk_attrs[] = {
+	&sys_write_max_attr,
 	&sys_stats_attr,
 	&sys_inflight_writes_attr,
 #ifdef CONFIG_NVM_DEBUG
@@ -722,6 +756,8 @@ static ssize_t pblk_sysfs_show(struct nvm_target *t, struct attribute *attr,
 
 	if (strcmp(attr->name, "stats") == 0)
 		return pblk_sysfs_stats(pblk, buf);
+	if (strcmp(attr->name, "write_max") == 0)
+		return pblk_sysfs_write_max(pblk, buf);
 #ifdef CONFIG_NVM_DEBUG
 	else if (strcmp(attr->name, "stats_debug") == 0)
 		return pblk_sysfs_stats_debug(pblk, buf);
@@ -846,6 +882,8 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	pblk->blk_meta.rlpg_page_len = dev->sec_per_pl * dev->sec_size;
 	pblk->blk_meta.bitmap_len =
 		BITS_TO_LONGS(pblk->nr_blk_dsecs) * sizeof(unsigned long);
+
+	pblk->write_cur_speed = PBLK_USER_MAX_SPEED;
 
 	ret = pblk_core_init(pblk);
 	if (ret) {

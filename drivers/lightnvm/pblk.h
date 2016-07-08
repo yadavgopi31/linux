@@ -348,6 +348,16 @@ struct pblk {
 #define PBLK_KICK_SECTS 1024
 	int write_cnt;
 
+	/* User write control */
+#define PBLK_USER_MAX_SPEED 400000
+#define PBLK_USER_LOW_THRS 50	/* full stop at 2 percent of available
+				 * blocks
+				 */
+#define PBLK_USER_HIGH_THRS 4	/* begin write limit at 25 percent
+				 * available blks
+				 */
+	int write_cur_speed;
+
 	/* capacity of devices when bad blocks are subtracted */
 	sector_t capacity;
 
