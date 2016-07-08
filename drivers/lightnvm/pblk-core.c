@@ -836,9 +836,9 @@ static void pblk_write_user_update(struct pblk *pblk)
 
 	for (i = 0; i < pblk->nr_luns; i++) {
 		lun = pblk->luns[i].parent;
-		spin_lock(&lun->lock);
+		//spin_lock(&lun->lock);
 		avail += lun->nr_free_blocks;
-		spin_unlock(&lun->lock);
+		//spin_unlock(&lun->lock);
 	}
 
 	high = pblk->total_blocks / PBLK_USER_HIGH_THRS;

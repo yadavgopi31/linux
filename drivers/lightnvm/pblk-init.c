@@ -588,9 +588,9 @@ static unsigned int pblk_get_avail_blks(struct pblk *pblk)
 
 	for (i = 0; i < pblk->nr_luns; i++) {
 		lun = pblk->luns[i].parent;
-		spin_lock(&lun->lock);
+		//spin_lock(&lun->lock);
 		avail += lun->nr_free_blocks;
-		spin_unlock(&lun->lock);
+		//spin_unlock(&lun->lock);
 	}
 
 	return avail;
