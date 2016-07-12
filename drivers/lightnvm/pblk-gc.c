@@ -421,7 +421,7 @@ static void pblk_block_gc(struct work_struct *work)
 	bitmap_copy(invalid_bitmap, rblk->invalid_bitmap, pblk->nr_blk_dsecs);
 	spin_unlock(&rblk->lock);
 
-#if CONFIG_NVM_DEBUG
+#ifdef CONFIG_NVM_DEBUG
 	BUG_ON(nr_valid_secs !=
 	pblk->nr_blk_dsecs - bitmap_weight(invalid_bitmap, pblk->nr_blk_dsecs));
 #endif
@@ -474,7 +474,7 @@ prepare_ppas:
 	if (total_moved < nr_valid_secs)
 		goto next_lba_list;
 
-#if CONFIG_NVM_DEBUG
+#ifdef CONFIG_NVM_DEBUG
 	BUG_ON(pblk->nr_blk_dsecs -
 		bitmap_weight(invalid_bitmap, pblk->nr_blk_dsecs) !=
 		total_moved);
