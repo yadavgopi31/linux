@@ -863,10 +863,18 @@ static inline int block_is_full(struct pblk *pblk, struct pblk_block *rblk)
 	return (rblk->cur_sec >= pblk->nr_blk_dsecs);
 }
 
-static inline void inc_stat(struct pblk *pblk, unsigned long *stat)
+static inline void inc_stat(struct pblk *pblk, unsigned long *stat, int interr)
 {
+	if (interr) {
+		unsigned long flags;
+
+		spin_lock_irqsave(&pblk->lock, flags);
+		(*stat)++;
+		spin_unlock_irqrestore(&pblk->lock, flags);
+	} else {
 		spin_lock_irq(&pblk->lock);
 		(*stat)++;
 		spin_unlock_irq(&pblk->lock);
+	}
 }
 #endif /* PBLK_H_ */

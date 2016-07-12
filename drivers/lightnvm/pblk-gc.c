@@ -94,7 +94,7 @@ static int pblk_gc_read_victim_blk(struct pblk *pblk, u64 *lba_list,
 	pblk_free_gc_rqd(pblk, rqd);
 
 	if (bio->bi_error) {
-		inc_stat(pblk, &pblk->read_failed_gc);
+		inc_stat(pblk, &pblk->read_failed_gc, 0);
 		pblk_print_failed_rqd(pblk, rqd, bio->bi_error);
 	}
 

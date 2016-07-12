@@ -649,7 +649,7 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 	wait_for_completion_io(&wait);
 
 	if (bio->bi_error) {
-		inc_stat(pblk, &pblk->read_failed);
+		inc_stat(pblk, &pblk->read_failed, 0);
 		pblk_print_failed_rqd(pblk, rqd, bio->bi_error);
 	}
 
@@ -1081,7 +1081,7 @@ retry:
 		nvm_mark_blk(dev, ppa, NVM_BLK_ST_BAD);
 		pblk_retire_blk(pblk, rblk);
 
-		inc_stat(pblk, &pblk->erase_failed);
+		inc_stat(pblk, &pblk->erase_failed, 0);
 		print_ppa(&ppa, "erase", 0);
 		goto retry;
 	}
@@ -1393,7 +1393,7 @@ static void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd,
 		nvm_dev_dma_free(pblk->dev, rqd->meta_list, rqd->dma_meta_list);
 
 	if (bio->bi_error) {
-		inc_stat(pblk, &pblk->read_failed);
+		inc_stat(pblk, &pblk->read_failed, 1);
 		pblk_print_failed_rqd(pblk, rqd, bio->bi_error);
 	}
 
