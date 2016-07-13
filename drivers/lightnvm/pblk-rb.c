@@ -541,6 +541,7 @@ try:
 		if (!page) {
 			pr_err("pblk: could not allocate write bio page\n");
 			flags &= ~PBLK_WRITTEN_DATA;
+			flags |= PBLK_WRITABLE_ENTRY;
 			/* Release flags on context. Protect from writes */
 			smp_store_release(&entry->w_ctx.flags, flags);
 			goto out;
@@ -550,6 +551,7 @@ try:
 		if (ret != rb->seg_size) {
 			pr_err("pblk: could not add page to write bio\n");
 			flags &= ~PBLK_WRITTEN_DATA;
+			flags |= PBLK_WRITABLE_ENTRY;
 			/* Release flags on context. Protect from writes */
 			smp_store_release(&entry->w_ctx.flags, flags);
 			goto out;
