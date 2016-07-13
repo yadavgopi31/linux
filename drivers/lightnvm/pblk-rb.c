@@ -618,7 +618,10 @@ struct pblk_w_ctx *pblk_rb_w_ctx(struct pblk_rb *rb, unsigned long pos)
 
 unsigned long pblk_rb_sync_init(struct pblk_rb *rb, unsigned long *flags)
 {
-	spin_lock_irqsave(&rb->s_lock, *flags);
+	if (flags)
+		spin_lock_irqsave(&rb->s_lock, *flags);
+	else
+		spin_lock_irq(&rb->s_lock);
 
 	return rb->sync;
 }
@@ -660,13 +663,16 @@ unsigned long pblk_rb_sync_advance(struct pblk_rb *rb, unsigned int nr_entries)
 	return sync;
 }
 
-void pblk_rb_sync_end(struct pblk_rb *rb, unsigned long flags)
+void pblk_rb_sync_end(struct pblk_rb *rb, unsigned long *flags)
 {
 #ifdef CONFIG_NVM_DEBUG
 	lockdep_assert_held(&rb->s_lock);
 #endif
 
-	spin_unlock_irqrestore(&rb->s_lock, flags);
+	if (flags)
+		spin_unlock_irqrestore(&rb->s_lock, *flags);
+	else
+		spin_unlock_irq(&rb->s_lock);
 }
 
 int pblk_rb_sync_point_set(struct pblk_rb *rb, struct bio *bio)

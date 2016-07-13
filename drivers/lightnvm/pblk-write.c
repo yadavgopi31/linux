@@ -101,9 +101,11 @@ static void pblk_page_pad_invalidate(struct pblk *pblk, struct pblk_block *rblk,
 	WARN_ON(test_and_set_bit(a.ppa, rblk->invalid_bitmap));
 	rblk->nr_invalid_secs++;
 
+	pblk_rb_sync_init(&pblk->rwb, NULL);
 	WARN_ON(test_and_set_bit(a.ppa, rblk->sync_bitmap));
 	if (bitmap_full(rblk->sync_bitmap, pblk->nr_blk_dsecs))
 		pblk_run_blk_ws(pblk, rblk, pblk_close_blk);
+	pblk_rb_sync_end(&pblk->rwb, NULL);
 }
 
 int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
