@@ -457,7 +457,8 @@ int pblk_write_ts(void *data)
 {
 	struct pblk *pblk = data;
 
-	while (!kthread_should_stop()) {
+	/* while (!kthread_should_stop()) { */
+	while(1) {
 		if (!pblk_submit_write(pblk))
 			continue;
 		set_current_state(TASK_INTERRUPTIBLE);
