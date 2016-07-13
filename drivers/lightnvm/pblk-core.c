@@ -896,8 +896,10 @@ retry:
 		return NVM_IO_REQUEUE;
 
 	ret = pblk_write_to_cache(pblk, bio, flags, nr_secs);
-	if (ret == NVM_IO_REQUEUE)
+	if (ret == NVM_IO_REQUEUE) {
+		schedule();
 		goto retry;
+	}
 
 	pblk_may_submit_write(pblk, nr_secs);
 
