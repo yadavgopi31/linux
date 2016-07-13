@@ -607,12 +607,12 @@ static ssize_t pblk_sysfs_write_max(struct pblk *pblk, char *page)
 				avail);
 }
 
+#ifdef CONFIG_NVM_DEBUG
 static ssize_t pblk_sysfs_inflight_writes(struct pblk *pblk, char *buf)
 {
 	return sprintf(buf, "%u\n", atomic_read(&pblk->write_inflight));
 }
 
-#ifdef CONFIG_NVM_DEBUG
 static ssize_t pblk_sysfs_stats_debug(struct pblk *pblk, char *page)
 {
 	return sprintf(page, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
