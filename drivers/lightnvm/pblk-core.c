@@ -625,6 +625,7 @@ int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 
 	new_bio->bi_iter.bi_sector = 0; /* artificial bio */
 	new_bio->bi_rw = READ;
+	bio_set_op_attrs(bio, REQ_OP_READ, 0);
 	new_bio->bi_private = &wait;
 	new_bio->bi_end_io = pblk_end_sync_bio;
 
@@ -941,6 +942,7 @@ void pblk_flush_writer(struct pblk *pblk)
 
 	bio->bi_iter.bi_sector = 0; /* artificial bio */
 	bio->bi_rw = REQ_OP_WRITE | REQ_PREFLUSH;
+	bio_set_op_attrs(bio, REQ_OP_WRITE, WRITE_FLUSH);
 	bio->bi_private = &wait;
 	bio->bi_end_io = pblk_end_sync_bio;
 
@@ -1421,7 +1423,7 @@ void pblk_end_io(struct nvm_rq *rqd)
 	struct pblk *pblk = container_of(rqd->ins, struct pblk, instance);
 	uint8_t nr_secs = rqd->nr_ppas;
 
-	if (rqd->bio->bi_rw == READ)
+	if (bio_data_dir(rqd->bio) == READ)
 		pblk_end_io_read(pblk, rqd, nr_secs);
 	else
 		pblk_end_io_write(pblk, rqd);
@@ -1580,6 +1582,7 @@ static void pblk_pad_blk(struct pblk *pblk, struct pblk_block *rblk,
 
 		bio->bi_iter.bi_sector = 0; /* artificial bio */
 		bio->bi_rw = WRITE;
+		bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 		bio->bi_private = &wait;
 		bio->bi_end_io = pblk_end_sync_bio;
 		rqd->bio = bio;
