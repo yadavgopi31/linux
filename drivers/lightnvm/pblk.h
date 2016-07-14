@@ -548,22 +548,13 @@ int pblk_setup_w_single(struct pblk *pblk, struct nvm_rq *rqd,
 			struct pblk_ctx *ctx, struct pblk_sec_meta *meta);
 
 /* pblk read path */
-int pblk_read_rq(struct pblk *pblk, struct bio *bio, struct nvm_rq *rqd,
-		 sector_t laddr, unsigned long *read_bitmap,
-		 unsigned long flags);
 int pblk_submit_read(struct pblk *pblk, struct bio *bio, unsigned long flags);
-int pblk_submit_read_io(struct pblk *pblk, struct bio *bio,
-			struct nvm_rq *rqd, unsigned long flags);
-int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
-			       unsigned long *read_bitmap, struct nvm_rq *rqd,
-			       uint8_t nr_secs);
 int pblk_submit_read_list(struct pblk *pblk, struct bio *bio,
 				 struct nvm_rq *rqd, u64 *lba_list,
 				 unsigned int nr_secs,
 				 unsigned int nr_rec_secs,
 				 unsigned long flags);
-void pblk_read_from_cache(struct pblk *pblk, struct bio *bio,
-			  struct ppa_addr ppa);
+void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd, uint8_t nr_secs);
 
 /* pblk block pool*/
 int pblk_blk_pool_init(struct pblk *pblk);
