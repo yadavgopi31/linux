@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * Recovery for pblk: physical block-device target
+ * pblk-recovery.c - pblk's recovery path
  */
 
 #include "pblk.h"

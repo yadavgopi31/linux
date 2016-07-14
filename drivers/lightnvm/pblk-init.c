@@ -15,7 +15,7 @@
  *
  * Implementation of a physical block-device target for Open-channel SSDs.
  *
- * Derived from rrpc.c
+ * pblk-init.c - pblk's initialization. Derived from rrpc.c
  */
 
 #include "pblk.h"

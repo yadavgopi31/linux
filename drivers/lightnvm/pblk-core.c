@@ -12,6 +12,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
+ * pblk-core.c - pblk's core functionality
+ *
  * TODO:
  *   - Implement L2P snapshot on graceful tear down.
  *   - Separate mapping from actual stripping strategy to enable

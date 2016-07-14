@@ -13,7 +13,7 @@
  * General Public License for more details.
  *
  *
- * pblk-read.c - 
+ * pblk-read.c - pblk's read path
  */
 
 #include "pblk.h"
