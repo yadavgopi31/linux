@@ -462,7 +462,7 @@ int pblk_write_ts(void *data)
 	while(1) {
 		if (!pblk_submit_write(pblk))
 			continue;
-		set_current_state(TASK_INTERRUPTIBLE);
+		/* set_current_state(TASK_INTERRUPTIBLE); */
 		io_schedule();
 	}
 
