@@ -501,8 +501,6 @@ struct nvm_rq *pblk_alloc_rqd(struct pblk *pblk, int rw);
 void pblk_free_rqd(struct pblk *pblk, struct nvm_rq *rqd, int rw);
 void pblk_flush_writer(struct pblk *pblk);
 void pblk_discard(struct pblk *pblk, struct bio *bio);
-int pblk_alloc_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
-		    struct pblk_ctx *ctx, unsigned int nr_secs);
 struct pblk_blk_rec_lpg *pblk_alloc_blk_meta(struct pblk *pblk,
 					     struct pblk_block *rblk,
 					     u32 status);
@@ -517,15 +515,6 @@ void pblk_end_close_blk_bio(struct pblk *pblk, struct nvm_rq *rqd, int run_gc);
 void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk);
 void pblk_run_blk_ws(struct pblk *pblk, struct pblk_block *rblk,
 		     void (*work)(struct work_struct *));
-void pblk_write_kick_timer_fn(unsigned long data);
-int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
-			     u64 *lba_list,
-			     struct pblk_kref_buf *ref_buf,
-			     unsigned int nr_secs,
-			     unsigned int nr_rec_secs,
-			     unsigned long flags,
-			     struct pblk_block *gc_rblk);
-void pblk_may_submit_write(struct pblk *pblk, int nr_secs);
 int pblk_bio_add_pages(struct pblk *pblk, struct bio *bio, gfp_t flags,
 		       int nr_pages);
 void pblk_bio_free_pages(struct pblk *pblk, struct bio *bio, int off,
@@ -536,16 +525,27 @@ int pblk_update_map_gc(struct pblk *pblk, sector_t laddr,
 		       struct pblk_block *rblk, struct ppa_addr ppa,
 		       struct pblk_block *gc_rblk);
 
-/* pblk write path */
-int pblk_buffer_write(struct pblk *pblk, struct bio *bio, unsigned long flags);
-int pblk_submit_write(struct pblk *pblk);
+/* pblk user I/O write path */
+int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
+			unsigned long flags);
+int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
+			     u64 *lba_list,
+			     struct pblk_kref_buf *ref_buf,
+			     unsigned int nr_secs,
+			     unsigned int nr_rec_secs,
+			     unsigned long flags,
+			     struct pblk_block *gc_rblk);
+
+/* pblk write thread */
 int pblk_write_ts(void *data);
 void pblk_write_timer_fn(unsigned long data);
-int pblk_setup_w_multi(struct pblk *pblk, struct nvm_rq *rqd,
+int pblk_write_setup_m(struct pblk *pblk, struct nvm_rq *rqd,
 		       struct pblk_ctx *ctx, struct pblk_sec_meta *meta,
 		       unsigned int valid_secs, int off);
-int pblk_setup_w_single(struct pblk *pblk, struct nvm_rq *rqd,
-			struct pblk_ctx *ctx, struct pblk_sec_meta *meta);
+int pblk_write_setup_s(struct pblk *pblk, struct nvm_rq *rqd,
+		       struct pblk_ctx *ctx, struct pblk_sec_meta *meta);
+int pblk_write_alloc_rq(struct pblk *pblk, struct nvm_rq *rqd,
+		    struct pblk_ctx *ctx, unsigned int nr_secs);
 
 /* pblk read path */
 int pblk_submit_read(struct pblk *pblk, struct bio *bio, unsigned long flags);

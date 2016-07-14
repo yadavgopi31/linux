@@ -51,7 +51,7 @@ static int pblk_submit_io(struct pblk *pblk, struct bio *bio,
 	if (bio_rw(bio) == READ)
 		return pblk_submit_read(pblk, bio, flags);
 
-	return pblk_buffer_write(pblk, bio, flags);
+	return pblk_write_to_cache(pblk, bio, flags);
 }
 
 static blk_qc_t pblk_make_rq(struct request_queue *q, struct bio *bio)

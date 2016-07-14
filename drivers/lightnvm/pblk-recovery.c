@@ -90,7 +90,7 @@ static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
 	int i;
 	int ret = 0;
 
-	ret = pblk_alloc_w_rq(pblk, rqd, ctx, nr_rec_secs);
+	ret = pblk_write_alloc_rq(pblk, rqd, ctx, nr_rec_secs);
 	if (ret)
 		goto out;
 
@@ -99,7 +99,7 @@ static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
 	if (unlikely(nr_rec_secs == 1)) {
 		BUG_ON(nr_secs != 1);
 		BUG_ON(padded_secs != 0);
-		ret = pblk_setup_w_single(pblk, rqd, ctx, meta);
+		ret = pblk_write_setup_s(pblk, rqd, ctx, meta);
 		goto out;
 	}
 
@@ -119,7 +119,7 @@ static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
 
 		setup_secs = (i + min > nr_rec_secs) ?
 						(nr_rec_secs % min) : min;
-		ret = pblk_setup_w_multi(pblk, rqd, ctx, meta, setup_secs, i);
+		ret = pblk_write_setup_m(pblk, rqd, ctx, meta, setup_secs, i);
 	}
 
 	rqd->ppa_status = (u64)0;

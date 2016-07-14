@@ -206,8 +206,8 @@ static int pblk_setup_write_to_cache(struct pblk *pblk, struct bio *bio,
  *
  * return: 1 if bio has been written to buffer, 0 otherwise.
  */
-static int pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
-			       unsigned long flags, unsigned int nr_entries)
+static int __pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
+				 unsigned long flags, unsigned int nr_entries)
 {
 	sector_t laddr = pblk_get_laddr(bio);
 	struct bio *ctx_bio = (bio->bi_rw & REQ_PREFLUSH) ? bio : NULL;
@@ -353,7 +353,7 @@ void pblk_write_timer_fn(unsigned long data)
 	mod_timer(&pblk->wtimer, jiffies + msecs_to_jiffies(1000));
 }
 
-int pblk_buffer_write(struct pblk *pblk, struct bio *bio, unsigned long flags)
+int pblk_write_to_cache(struct pblk *pblk, struct bio *bio, unsigned long flags)
 {
 	int nr_secs = pblk_get_secs(bio);
 	int ret = NVM_IO_DONE;
@@ -374,7 +374,7 @@ retry:
 	if (unlikely(pblk_gc_is_emergency(pblk)))
 		return NVM_IO_REQUEUE;
 
-	ret = pblk_write_to_cache(pblk, bio, flags, nr_secs);
+	ret = __pblk_write_to_cache(pblk, bio, flags, nr_secs);
 	if (ret == NVM_IO_REQUEUE) {
 		schedule();
 		goto retry;
@@ -424,7 +424,7 @@ void pblk_flush_writer(struct pblk *pblk)
 	bio->bi_private = &wait;
 	bio->bi_end_io = pblk_end_sync_bio;
 
-	ret = pblk_buffer_write(pblk, bio, 0);
+	ret = pblk_write_to_cache(pblk, bio, 0);
 	if (ret == NVM_IO_OK)
 		wait_for_completion_io(&wait);
 	else if (ret != NVM_IO_DONE)
@@ -932,7 +932,7 @@ static int pblk_setup_pad_rq(struct pblk *pblk, struct pblk_block *rblk,
 	int i;
 	int ret = 0;
 
-	ret = pblk_alloc_w_rq(pblk, rqd, ctx, nr_secs);
+	ret = pblk_write_alloc_rq(pblk, rqd, ctx, nr_secs);
 	if (ret)
 		goto out;
 
@@ -1167,35 +1167,5 @@ void pblk_put_blk(struct pblk *pblk, struct pblk_block *rblk)
 	spin_lock(&rlun->lock_lists);
 	pblk_put_blk_unlocked(pblk, rblk);
 	spin_unlock(&rlun->lock_lists);
-}
-
-int pblk_alloc_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
-		    struct pblk_ctx *ctx, unsigned int nr_secs)
-{
-	/* Setup write request */
-	rqd->opcode = NVM_OP_PWRITE;
-	rqd->ins = &pblk->instance;
-	rqd->nr_ppas = nr_secs;
-	rqd->flags |= pblk_set_progr_mode(pblk);
-
-	rqd->meta_list = nvm_dev_dma_alloc(pblk->dev, GFP_KERNEL,
-							&rqd->dma_meta_list);
-	if (!rqd->meta_list) {
-		pr_err("pblk: not able to allocate metadata list\n");
-		return -ENOMEM;
-	}
-
-	if (unlikely(nr_secs == 1))
-		return 0;
-
-	rqd->ppa_list = nvm_dev_dma_alloc(pblk->dev, GFP_KERNEL,
-							&rqd->dma_ppa_list);
-	if (!rqd->ppa_list) {
-		nvm_dev_dma_free(pblk->dev, rqd->meta_list, rqd->dma_meta_list);
-		pr_err("pblk: not able to allocate ppa list\n");
-		return -ENOMEM;
-	}
-
-	return 0;
 }
 

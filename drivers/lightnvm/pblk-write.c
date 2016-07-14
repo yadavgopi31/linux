@@ -243,8 +243,8 @@ try_cur:
 	return ret;
 }
 
-int pblk_setup_w_single(struct pblk *pblk, struct nvm_rq *rqd,
-			struct pblk_ctx *ctx, struct pblk_sec_meta *meta)
+int pblk_write_setup_s(struct pblk *pblk, struct nvm_rq *rqd,
+		       struct pblk_ctx *ctx, struct pblk_sec_meta *meta)
 {
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
 	int ret;
@@ -262,7 +262,7 @@ int pblk_setup_w_single(struct pblk *pblk, struct nvm_rq *rqd,
 	return ret;
 }
 
-int pblk_setup_w_multi(struct pblk *pblk, struct nvm_rq *rqd,
+int pblk_write_setup_m(struct pblk *pblk, struct nvm_rq *rqd,
 		       struct pblk_ctx *ctx, struct pblk_sec_meta *meta,
 		       unsigned int valid_secs, int off)
 {
@@ -272,6 +272,36 @@ int pblk_setup_w_multi(struct pblk *pblk, struct nvm_rq *rqd,
 	return pblk_map_rr_page(pblk, c_ctx->sentry + off,
 					&rqd->ppa_list[off],
 					&meta[off], min, valid_secs);
+}
+
+int pblk_write_alloc_rq(struct pblk *pblk, struct nvm_rq *rqd,
+			struct pblk_ctx *ctx, unsigned int nr_secs)
+{
+	/* Setup write request */
+	rqd->opcode = NVM_OP_PWRITE;
+	rqd->ins = &pblk->instance;
+	rqd->nr_ppas = nr_secs;
+	rqd->flags |= pblk_set_progr_mode(pblk);
+
+	rqd->meta_list = nvm_dev_dma_alloc(pblk->dev, GFP_KERNEL,
+							&rqd->dma_meta_list);
+	if (!rqd->meta_list) {
+		pr_err("pblk: not able to allocate metadata list\n");
+		return -ENOMEM;
+	}
+
+	if (unlikely(nr_secs == 1))
+		return 0;
+
+	rqd->ppa_list = nvm_dev_dma_alloc(pblk->dev, GFP_KERNEL,
+							&rqd->dma_ppa_list);
+	if (!rqd->ppa_list) {
+		nvm_dev_dma_free(pblk->dev, rqd->meta_list, rqd->dma_meta_list);
+		pr_err("pblk: not able to allocate ppa list\n");
+		return -ENOMEM;
+	}
+
+	return 0;
 }
 
 static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
@@ -287,7 +317,7 @@ static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 	int i;
 	int ret = 0;
 
-	ret = pblk_alloc_w_rq(pblk, rqd, ctx, nr_secs);
+	ret = pblk_write_alloc_rq(pblk, rqd, ctx, nr_secs);
 	if (ret)
 		goto out;
 
@@ -295,14 +325,14 @@ static int pblk_setup_w_rq(struct pblk *pblk, struct nvm_rq *rqd,
 
 	if (unlikely(nr_secs == 1)) {
 		BUG_ON(padded_secs != 0);
-		ret = pblk_setup_w_single(pblk, rqd, ctx, meta);
+		ret = pblk_write_setup_s(pblk, rqd, ctx, meta);
 		goto out;
 	}
 
 	for (i = 0; i < nr_secs; i += min) {
 		setup_secs = (i + min > valid_secs) ?
 						(valid_secs % min) : min;
-		ret = pblk_setup_w_multi(pblk, rqd, ctx, meta, setup_secs, i);
+		ret = pblk_write_setup_m(pblk, rqd, ctx, meta, setup_secs, i);
 		if (ret)
 			goto out;
 	}
