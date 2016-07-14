@@ -546,6 +546,7 @@ int pblk_write_setup_s(struct pblk *pblk, struct nvm_rq *rqd,
 		       struct pblk_ctx *ctx, struct pblk_sec_meta *meta);
 int pblk_write_alloc_rq(struct pblk *pblk, struct nvm_rq *rqd,
 		    struct pblk_ctx *ctx, unsigned int nr_secs);
+void pblk_end_io_write(struct pblk *pblk, struct nvm_rq *rqd);
 
 /* pblk read path */
 int pblk_submit_read(struct pblk *pblk, struct bio *bio, unsigned long flags);
