@@ -214,7 +214,9 @@ static int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 
 	if (new_bio->bi_error) {
 		inc_stat(pblk, &pblk->read_failed, 0);
+#ifdef CONFIG_NVM_DEBUG
 		pblk_print_failed_rqd(pblk, rqd, new_bio->bi_error);
+#endif
 	}
 
 	if (unlikely(nr_secs > 1 && nr_holes == 1)) {
@@ -558,7 +560,9 @@ void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd, uint8_t nr_secs)
 
 	if (bio->bi_error) {
 		inc_stat(pblk, &pblk->read_failed, 1);
+#ifdef CONFIG_NVM_DEBUG
 		pblk_print_failed_rqd(pblk, rqd, bio->bi_error);
+#endif
 	}
 
 	bio_put(bio);
