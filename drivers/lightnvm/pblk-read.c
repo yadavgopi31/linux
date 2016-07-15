@@ -212,9 +212,9 @@ static int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 	ret = pblk_submit_read_io(pblk, new_bio, rqd, r_ctx->flags);
 	wait_for_completion_io(&wait);
 
-	if (bio->bi_error) {
+	if (new_bio->bi_error) {
 		inc_stat(pblk, &pblk->read_failed, 0);
-		pblk_print_failed_rqd(pblk, rqd, bio->bi_error);
+		pblk_print_failed_rqd(pblk, rqd, new_bio->bi_error);
 	}
 
 	if (unlikely(nr_secs > 1 && nr_holes == 1)) {
