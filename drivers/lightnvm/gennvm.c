@@ -675,6 +675,7 @@ static void gen_mark_blk(struct nvm_dev *dev, struct ppa_addr ppa, int type)
 	struct gen_dev *gn = dev->mp;
 	struct gen_lun *lun;
 	struct nvm_block *blk;
+	int ret;
 
 	pr_debug("gen: ppa  (ch: %u lun: %u blk: %u pg: %u) -> %u\n",
 			ppa.g.ch, ppa.g.lun, ppa.g.blk, ppa.g.pg, type);
@@ -695,6 +696,10 @@ static void gen_mark_blk(struct nvm_dev *dev, struct ppa_addr ppa, int type)
 
 	/* will be moved to bb list on put_blk from target */
 	blk->state = type;
+
+	ret = dev->ops->set_bb_tbl(dev, &ppa, 1, NVM_BLK_T_GRWN_BAD);
+	if (ret)
+		pr_err("gen: failed to mark bb (id:%lu)\n", blk->id);
 }
 
 /*
