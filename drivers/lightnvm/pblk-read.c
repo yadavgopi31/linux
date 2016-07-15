@@ -176,10 +176,8 @@ static int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 		return NVM_IO_ERR;
 	}
 
-	if (pblk_bio_add_pages(pblk, new_bio, GFP_KERNEL, nr_holes)) {
-		bio_put(bio);
+	if (pblk_bio_add_pages(pblk, new_bio, GFP_KERNEL, nr_holes))
 		goto err;
-	}
 
 	if (nr_holes != new_bio->bi_vcnt) {
 		pr_err("pblk: malformed bio\n");
@@ -211,6 +209,11 @@ static int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 
 	ret = pblk_submit_read_io(pblk, new_bio, rqd, r_ctx->flags);
 	wait_for_completion_io(&wait);
+	if (ret) {
+		pr_err("pblk: read IO submission failed\n");
+		r_ctx->flags = 0;
+		goto err;
+	}
 
 	if (new_bio->bi_error) {
 		inc_stat(pblk, &pblk->read_failed, 0);
@@ -223,9 +226,6 @@ static int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 		rqd->ppa_list = ppa_ptr;
 		rqd->dma_ppa_list = dma_ppa_list;
 	}
-
-	if (ret || new_bio->bi_error)
-		goto err;
 
 	/* Fill the holes in the original bio */
 	i = 0;
@@ -260,14 +260,13 @@ static int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 	bio_endio(bio);
 	pblk_end_io(rqd);
 	return NVM_IO_OK;
+
 err:
 	/* Free allocated pages in new bio */
 	pblk_bio_free_pages(pblk, bio, 0, new_bio->bi_vcnt);
-	bio_endio(new_bio);
 	pblk_end_io(rqd);
 	return NVM_IO_ERR;
 }
-
 
 static int __pblk_submit_read(struct pblk *pblk, struct nvm_rq *rqd,
 			      struct bio *bio, unsigned long *read_bitmap,
