@@ -396,6 +396,8 @@ int pblk_submit_write(struct pblk *pblk)
 	unsigned long pos;
 	int err;
 
+	set_current_state(TASK_RUNNING);
+
 	/* Pre-check if we should start writing before doing allocations */
 	secs_to_flush = pblk_rb_sync_point_count(&pblk->rwb);
 	count = pblk_rb_count(&pblk->rwb);
@@ -489,12 +491,10 @@ int pblk_write_ts(void *data)
 {
 	struct pblk *pblk = data;
 
-	/* while (!kthread_should_stop()) { */
-	while(1) {
+	while (!kthread_should_stop()) {
+		set_current_state(TASK_INTERRUPTIBLE);
 		if (!pblk_submit_write(pblk))
-			continue;
-		/* set_current_state(TASK_INTERRUPTIBLE); */
-		io_schedule();
+			io_schedule();
 	}
 
 	return 0;
