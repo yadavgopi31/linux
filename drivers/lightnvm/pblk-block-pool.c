@@ -217,4 +217,5 @@ retry:
 	destroy_workqueue(blk_pool->wq);
 	kfree(blk_pool->queues);
 	kfree(blk_pool->bitmap);
+	mempool_destroy(pblk->blk_meta_pool);
 }

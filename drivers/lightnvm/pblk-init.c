@@ -295,7 +295,6 @@ static void pblk_core_free(struct pblk *pblk)
 	mempool_destroy(pblk->rec_pool);
 	mempool_destroy(pblk->r_rq_pool);
 	mempool_destroy(pblk->w_rq_pool);
-	mempool_destroy(pblk->blk_meta_pool);
 }
 
 static void pblk_luns_free(struct pblk *pblk)
@@ -431,14 +430,14 @@ static void pblk_free(struct pblk *pblk)
 	pblk_luns_free(pblk);
 	pblk_area_free(pblk);
 
-	del_timer(&pblk->wtimer);
-
 	kfree(pblk);
 }
 
 static void pblk_tear_down(struct pblk *pblk)
 {
 	pblk_flush_writer(pblk);
+
+	del_timer(&pblk->wtimer);
 	kthread_stop(pblk->ts_writer);
 
 	/* TODO: must wait on it to finish, else
