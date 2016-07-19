@@ -25,10 +25,16 @@ static void blk_pool_alloc_ws(struct work_struct *work)
 	struct pblk_prov_queue *queue;
 	struct pblk_lun *rlun;
 	struct pblk_block *rblk;
-	void *bitmap = blk_pool->bitmap;
+	void *bitmap;
 	int nr_luns = blk_pool->nr_luns;
+	int qd;
 	int nr_elems;
 	int bit;
+
+	spin_lock(&blk_pool->lock);
+	bitmap = blk_pool->bitmap;
+	qd = blk_pool->qd;
+	spin_unlock(&blk_pool->lock);
 
 provision:
 	bit = -1;
@@ -47,14 +53,23 @@ provision:
 
 		spin_lock(&queue->lock);
 		list_add_tail(&rblk->list, &queue->list);
-		nr_elems = queue->nr_elems++;
+		nr_elems = ++queue->nr_elems;
 		spin_unlock(&queue->lock);
 
-		if (nr_elems == blk_pool->qd)
+		if (nr_elems == qd) {
+			spin_lock(&blk_pool->lock);
+			bitmap = blk_pool->bitmap;
 			set_bit(bit, bitmap);
+			spin_unlock(&blk_pool->lock);
+		}
 	}
 
-	if (!bitmap_full(blk_pool->bitmap, nr_luns))
+	spin_lock(&blk_pool->lock);
+	bitmap = blk_pool->bitmap;
+	qd = blk_pool->qd;
+	spin_unlock(&blk_pool->lock);
+
+	if (!bitmap_full(bitmap, nr_luns))
 		goto provision;
 
 	mod_timer(&blk_pool->timer, jiffies + msecs_to_jiffies(10));
@@ -95,19 +110,21 @@ struct pblk_block *pblk_blk_pool_get(struct pblk *pblk, struct pblk_lun *rlun)
 
 	spin_lock(&queue->lock);
 	if (!queue->nr_elems) {
-		blk_pool->qd++;
 		spin_unlock(&queue->lock);
 		goto out;
 	}
 
 	rblk = list_first_entry(&queue->list, struct pblk_block, list);
-	nr_elems = queue->nr_elems--;
+	nr_elems = --queue->nr_elems;
 	spin_unlock(&queue->lock);
 
 	/* TODO: Follow a richer heuristic based on flash type too */
 	if (nr_elems < 2) {
-		pblk_prov_kick(blk_pool);
+		spin_lock(&blk_pool->lock);
 		clear_bit(bit, blk_pool->bitmap);
+		spin_unlock(&blk_pool->lock);
+
+		pblk_prov_kick(blk_pool);
 	}
 
 	spin_lock(&rlun->lock_lists);
@@ -157,9 +174,11 @@ int pblk_blk_pool_init(struct pblk *pblk)
 	spin_lock_init(&blk_pool->lock);
 
 	bitmap_len = BITS_TO_LONGS(blk_pool->nr_luns) * sizeof(unsigned long);
-	blk_pool->bitmap = kzalloc(bitmap_len, GFP_KERNEL);
+	blk_pool->bitmap = kmalloc(bitmap_len, GFP_KERNEL);
 	if (!blk_pool->bitmap)
 		goto fail_free_queues;
+
+	bitmap_zero(blk_pool->bitmap, blk_pool->nr_luns);
 
 	for (i = 0; i < blk_pool->nr_luns; i++) {
 		queue = &blk_pool->queues[i];
@@ -184,11 +203,15 @@ fail_destroy_wq:
 void pblk_blk_pool_free(struct pblk *pblk)
 {
 	struct pblk_blk_pool *blk_pool = &pblk->blk_pool;
-	void *bitmap = blk_pool->bitmap;
 	struct pblk_block *rblk, *trblk;
 	struct pblk_prov_queue *queue;
+	void *bitmap;
 	int nr_luns = blk_pool->nr_luns;
 	int i;
+
+	spin_lock(&blk_pool->lock);
+	bitmap = blk_pool->bitmap;
+	spin_unlock(&blk_pool->lock);
 
 	/* Wait for provisioning thread to finish */
 retry:
