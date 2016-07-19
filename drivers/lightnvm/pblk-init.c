@@ -692,6 +692,11 @@ static ssize_t pblk_sysfs_write_buffer(struct pblk *pblk, char *buf)
 {
 	return pblk_rb_sysfs(&pblk->rwb, buf);
 }
+
+static ssize_t pblk_sysfs_block_pool(struct pblk *pblk, char *buf)
+{
+	return pblk_blk_pool_sysfs(pblk, buf);
+}
 #endif
 
 static struct attribute sys_write_max_attr = {
@@ -729,6 +734,11 @@ static struct attribute sys_rb_attr = {
 	.name = "write_buffer",
 	.mode = S_IRUGO
 };
+
+static struct attribute sys_blk_pool_attr = {
+	.name = "block_pool",
+	.mode = S_IRUGO
+};
 #endif
 
 static struct attribute *pblk_attrs[] = {
@@ -740,6 +750,7 @@ static struct attribute *pblk_attrs[] = {
 	&sys_open_blocks_attr,
 	&sys_bad_blocks_attr,
 	&sys_rb_attr,
+	&sys_blk_pool_attr,
 #endif
 	NULL,
 };
@@ -768,6 +779,8 @@ static ssize_t pblk_sysfs_show(struct nvm_target *t, struct attribute *attr,
 		return pblk_sysfs_bad_blks(pblk, buf);
 	else if (strcmp(attr->name, "write_buffer") == 0)
 		return pblk_sysfs_write_buffer(pblk, buf);
+	else if (strcmp(attr->name, "block_pool") == 0)
+		return pblk_sysfs_block_pool(pblk, buf);
 #endif
 	return 0;
 }

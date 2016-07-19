@@ -492,6 +492,10 @@ int pblk_rb_pos_oob(struct pblk_rb *rb, u64 pos);
 
 void pblk_rb_data_free(struct pblk_rb *rb);
 
+#ifdef CONFIG_NVM_DEBUG
+ssize_t pblk_rb_sysfs(struct pblk_rb *rb, char *buf);
+#endif
+
 /*
  * pblk core
  */
@@ -566,6 +570,10 @@ void pblk_blk_pool_run(struct pblk *pblk);
 void pblk_blk_pool_stop(struct pblk *pblk);
 struct pblk_block *pblk_blk_pool_get(struct pblk *pblk, struct pblk_lun *lun);
 
+#ifdef CONFIG_NVM_DEBUG
+ssize_t pblk_blk_pool_sysfs(struct pblk *pblk, char *buf);
+#endif
+
 /* pblk recovery */
 void pblk_submit_rec(struct work_struct *work);
 void pblk_run_recovery(struct pblk *pblk, struct pblk_block *rblk);
@@ -596,9 +604,6 @@ void pblk_gc_check_emergency_out(struct pblk *pblk, struct pblk_lun *rlun);
 int pblk_gc_is_emergency(struct pblk *pblk);
 void pblk_gc_kick(struct pblk *pblk);
 
-#ifdef CONFIG_NVM_DEBUG
-ssize_t pblk_rb_sysfs(struct pblk_rb *rb, char *buf);
-#endif
 
 void pblk_print_failed_rqd(struct pblk *pblk, struct nvm_rq *rqd, int error);
 

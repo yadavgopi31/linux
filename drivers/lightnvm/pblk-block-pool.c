@@ -264,3 +264,33 @@ retry:
 	kfree(blk_pool->bitmap);
 	mempool_destroy(pblk->blk_meta_pool);
 }
+
+
+#ifdef CONFIG_NVM_DEBUG
+ssize_t pblk_blk_pool_sysfs(struct pblk *pblk, char *buf)
+{
+	struct pblk_blk_pool *blk_pool = &pblk->blk_pool;
+	struct pblk_lun *rlun;
+	struct pblk_prov_queue *queue;
+	int i;
+	ssize_t sz;
+
+	spin_lock(&blk_pool->lock);
+	sz = bitmap_print_to_pagebuf(0, buf, blk_pool->bitmap,
+							blk_pool->nr_luns);
+	spin_unlock(&blk_pool->lock);
+
+	pblk_for_each_lun(pblk, rlun, i) {
+		queue = &blk_pool->queues[i];
+		spin_lock(&queue->lock);
+		sz += sprintf(buf + sz, "LUN:%d\t%d\t%d\n",
+					rlun->parent->id,
+					queue->nr_elems,
+					queue->qd);
+		spin_unlock(&queue->lock);
+	}
+
+	return sz;
+}
+#endif
+
