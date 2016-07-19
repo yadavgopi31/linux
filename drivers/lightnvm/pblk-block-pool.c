@@ -33,7 +33,6 @@ static void blk_pool_alloc_ws(struct work_struct *work)
 
 	spin_lock(&blk_pool->lock);
 	bitmap = blk_pool->bitmap;
-	qd = blk_pool->qd;
 	spin_unlock(&blk_pool->lock);
 
 provision:
@@ -54,6 +53,7 @@ provision:
 		spin_lock(&queue->lock);
 		list_add_tail(&rblk->list, &queue->list);
 		nr_elems = ++queue->nr_elems;
+		qd = queue->qd;
 		spin_unlock(&queue->lock);
 
 		if (nr_elems == qd) {
@@ -66,7 +66,6 @@ provision:
 
 	spin_lock(&blk_pool->lock);
 	bitmap = blk_pool->bitmap;
-	qd = blk_pool->qd;
 	spin_unlock(&blk_pool->lock);
 
 	if (!bitmap_full(bitmap, nr_luns))
@@ -86,7 +85,7 @@ static void pblk_prov_kick(struct pblk_blk_pool *blk_pool)
 	queue_work(blk_pool->wq, &blk_pool->ws);
 }
 
-static void blk_pool_timer_fn(unsigned long data)
+static void blk_pool_prov_timer_fn(unsigned long data)
 {
 	struct pblk *pblk = (struct pblk *)data;
 	struct pblk_blk_pool *blk_pool = &pblk->blk_pool;
@@ -96,6 +95,19 @@ static void blk_pool_timer_fn(unsigned long data)
 		pblk_prov_kick(blk_pool);
 	else
 		mod_timer(&blk_pool->timer, jiffies + msecs_to_jiffies(10));
+}
+
+static void blk_pool_qd_timer_fn(unsigned long data)
+{
+	struct pblk_prov_queue *queue = (struct pblk_prov_queue *)data;
+
+	spin_lock(&queue->lock);
+	if (queue->qd > NVM_BLK_POOL_DEF_QD) {
+		queue->qd--;
+		mod_timer(&queue->qd_timer,
+					jiffies + msecs_to_jiffies(1000));
+	}
+	spin_unlock(&queue->lock);
 }
 
 struct pblk_block *pblk_blk_pool_get(struct pblk *pblk, struct pblk_lun *rlun)
@@ -110,6 +122,7 @@ struct pblk_block *pblk_blk_pool_get(struct pblk *pblk, struct pblk_lun *rlun)
 
 	spin_lock(&queue->lock);
 	if (!queue->nr_elems) {
+		queue->qd++;
 		spin_unlock(&queue->lock);
 		goto out;
 	}
@@ -130,6 +143,8 @@ struct pblk_block *pblk_blk_pool_get(struct pblk *pblk, struct pblk_lun *rlun)
 	spin_lock(&rlun->lock_lists);
 	list_move_tail(&rblk->list, &rlun->open_list);
 	spin_unlock(&rlun->lock_lists);
+
+	mod_timer(&queue->qd_timer, jiffies + msecs_to_jiffies(1000));
 out:
 	return rblk;
 }
@@ -164,8 +179,6 @@ int pblk_blk_pool_init(struct pblk *pblk)
 	 * increased if having pressure on the write thread
 	 */
 	blk_pool->nr_luns = pblk->nr_luns;
-	blk_pool->qd = 2;
-
 	blk_pool->queues = kmalloc(sizeof(struct pblk_prov_queue) *
 					blk_pool->nr_luns, GFP_KERNEL);
 	if (!blk_pool->queues)
@@ -186,10 +199,15 @@ int pblk_blk_pool_init(struct pblk *pblk)
 		INIT_LIST_HEAD(&queue->list);
 		spin_lock_init(&queue->lock);
 		queue->nr_elems = 0;
+		queue->qd = NVM_BLK_POOL_DEF_QD;
+
+		setup_timer(&queue->qd_timer, blk_pool_qd_timer_fn,
+							(unsigned long)queue);
 	}
 
 	INIT_WORK(&blk_pool->ws, blk_pool_alloc_ws);
-	setup_timer(&blk_pool->timer, blk_pool_timer_fn, (unsigned long)pblk);
+	setup_timer(&blk_pool->timer, blk_pool_prov_timer_fn,
+							(unsigned long)pblk);
 
 	return 0;
 
@@ -230,12 +248,16 @@ retry:
 		}
 
 		WARN_ON(queue->nr_elems);
-
-		clear_bit(i, bitmap);
 		spin_unlock(&queue->lock);
+
+		spin_lock(&blk_pool->lock);
+		clear_bit(i, bitmap);
+		spin_unlock(&blk_pool->lock);
 	}
 
-	WARN_ON(!bitmap_empty(bitmap, nr_luns));
+	spin_lock(&blk_pool->lock);
+	WARN_ON(!bitmap_empty(blk_pool->bitmap, nr_luns));
+	spin_unlock(&blk_pool->lock);
 
 	destroy_workqueue(blk_pool->wq);
 	kfree(blk_pool->queues);

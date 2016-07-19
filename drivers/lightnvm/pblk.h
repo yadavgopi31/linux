@@ -280,6 +280,8 @@ struct pblk_lun {
 	spinlock_t lock;
 };
 
+#define NVM_BLK_POOL_DEF_QD 2
+
 /* Calculated values for GC thresholding. These are used to regulate user I/O
  * based on disk utilization and the necessity of GC
  *
@@ -295,8 +297,10 @@ struct pblk_gc_thresholds {
 
 struct pblk_prov_queue {
 	struct list_head list;
+	struct timer_list qd_timer;
 	spinlock_t lock;
 	int nr_elems;
+	int qd;
 };
 
 struct pblk_blk_pool {
@@ -305,8 +309,6 @@ struct pblk_blk_pool {
 
 	unsigned long *bitmap;
 	int nr_luns;
-	int qd;
-
 	struct timer_list timer;
 	struct workqueue_struct *wq;
 	struct work_struct ws;
