@@ -17,38 +17,6 @@
 
 #include "pblk.h"
 
-static struct pblk_lun *get_next_lun(struct pblk *pblk)
-{
-	int next = atomic_inc_return(&pblk->next_lun);
-
-	return pblk->w_luns[next % pblk->nr_w_luns];
-}
-
-static struct pblk_lun *pblk_get_lun_rr(struct pblk *pblk, int is_gc)
-{
-	unsigned int i;
-	struct pblk_lun *rlun, *max_free;
-
-	if (!is_gc)
-		return get_next_lun(pblk);
-
-	/* during GC, we don't care about RR, instead we want to make
-	 * sure that we maintain evenness between the block luns.
-	 */
-	max_free = &pblk->luns[0];
-	/* prevent GC-ing lun from devouring pages of a lun with
-	 * little free blocks. We don't take the lock as we only need an
-	 * estimate.
-	 */
-	pblk_for_each_lun(pblk, rlun, i) {
-		if (rlun->parent->nr_free_blocks >
-					max_free->parent->nr_free_blocks)
-			max_free = rlun;
-	}
-
-	return max_free;
-}
-
 /* rblk->lock must be taken */
 static inline u64 pblk_next_base_sec(struct pblk *pblk, struct pblk_block *rblk,
 				     int nr_secs)
@@ -181,67 +149,27 @@ int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 	return 0;
 }
 
-static int pblk_replace_blk(struct pblk *pblk, struct pblk_block *rblk,
-			    struct pblk_lun *rlun)
+int pblk_replace_blk(struct pblk *pblk, struct pblk_block *rblk,
+		     struct pblk_lun *rlun, int lun_pos)
 {
 	rblk = pblk_blk_pool_get(pblk, rlun);
 	if (!rblk)
 		return 0;
 
 	pblk_set_lun_cur(rlun, rblk);
+
+	if (lun_pos >= 0 && pblk->w_luns.nr_luns < pblk->nr_luns) {
+		int next_lun;
+
+		spin_lock(&pblk->w_luns.lock);
+			next_lun = pblk_map_replace_lun(pblk);
+			pblk->w_luns.luns[lun_pos] = &pblk->luns[next_lun];
+		spin_unlock(&pblk->w_luns.lock);
+
+		return 0;
+	}
+
 	return 1;
-}
-
-/* Simple round-robin Logical to physical address translation.
- *
- * Retrieve the mapping using the active append point. Then update the ap for
- * the next write to the disk. Mapping occurs at a page granurality, i.e., if a
- * page is 4 sectors, then each map entails 4 lba-ppa mappings - @nr_secs is the
- * number of sectors in the page, taking number of planes also into
- * consideration
- *
- * TODO: We are missing GC path
- * TODO: Add support for MLC and TLC padding. For now only supporting SLC
- */
-static int pblk_map_rr_page(struct pblk *pblk, unsigned int sentry,
-				struct ppa_addr *ppa_list,
-				struct pblk_sec_meta *meta_list,
-				unsigned int nr_secs, unsigned int valid_secs)
-{
-	struct pblk_block *rblk;
-	struct pblk_lun *rlun;
-	int gen_emergency_gc;
-	int ret = 0;
-
-try_lun:
-	gen_emergency_gc = pblk_gc_is_emergency(pblk);
-	rlun = pblk_get_lun_rr(pblk, gen_emergency_gc);
-	spin_lock(&rlun->lock);
-
-try_cur:
-	rblk = rlun->cur;
-
-	/* Account for grown bad blocks */
-	if (unlikely(block_is_bad(rblk))) {
-		if (!pblk_replace_blk(pblk, rblk, rlun)) {
-			spin_unlock(&rlun->lock);
-			goto try_lun;
-		}
-		goto try_cur;
-	}
-
-	ret = pblk_map_page(pblk, rblk, sentry, ppa_list, meta_list,
-							nr_secs, valid_secs);
-	if (ret) {
-		if (!pblk_replace_blk(pblk, rblk, rlun)) {
-			spin_unlock(&rlun->lock);
-			goto try_lun;
-		}
-		goto try_cur;
-	}
-
-	spin_unlock(&rlun->lock);
-	return ret;
 }
 
 int pblk_write_setup_s(struct pblk *pblk, struct nvm_rq *rqd,

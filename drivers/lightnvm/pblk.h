@@ -314,6 +314,19 @@ struct pblk_blk_pool {
 	struct work_struct ws;
 };
 
+/* Write strategy */
+struct pblk_w_luns {
+	int nr_luns;		/* Number of writable luns */
+	struct pblk_lun **luns; /* Pointers to writable luns */
+
+	int next_w_lun;		/* Whenever sector is written, this is updated
+				 * to point to the next write lun
+				 */
+	int next_lun;		/* Next non-writable lun to become writable */
+
+	spinlock_t lock;
+};
+
 #define NVM_MEM_PAGE_WRITE (8)
 
 struct pblk {
@@ -330,8 +343,7 @@ struct pblk {
 	int nr_luns;
 	struct pblk_lun *luns;
 
-	int nr_w_luns;
-	struct pblk_lun **w_luns;
+	struct pblk_w_luns w_luns;
 
 	/* calculated values */
 	unsigned long long nr_secs;
@@ -365,13 +377,6 @@ struct pblk {
 
 	/* capacity of devices when bad blocks are subtracted */
 	sector_t capacity;
-
-	/* Write strategy variables. Move these into each for structure for each
-	 * strategy
-	 */
-	atomic_t next_lun; /* Whenever sector is written, this is updated
-			    * to point to the next write lun
-			    */
 
 #ifdef CONFIG_NVM_DEBUG
 	/* All debug counters apply to 4kb sector I/Os */
@@ -520,6 +525,8 @@ void pblk_end_sync_bio(struct bio *bio);
 void pblk_free_blks(struct pblk *pblk);
 void pblk_pad_open_blks(struct pblk *pblk);
 struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun);
+int pblk_replace_blk(struct pblk *pblk, struct pblk_block *rblk,
+		     struct pblk_lun *rlun, int lun_pos);
 void pblk_end_close_blk_bio(struct pblk *pblk, struct nvm_rq *rqd, int run_gc);
 void pblk_set_lun_cur(struct pblk_lun *rlun, struct pblk_block *rblk);
 void pblk_run_blk_ws(struct pblk *pblk, struct pblk_block *rblk,
@@ -544,6 +551,15 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 			     unsigned int nr_rec_secs,
 			     unsigned long flags,
 			     struct pblk_block *gc_rblk);
+
+/* pblk map */
+int pblk_map_init(struct pblk *pblk);
+void pblk_map_free(struct pblk *pblk);
+int pblk_map_rr_page(struct pblk *pblk, unsigned int sentry,
+		     struct ppa_addr *ppa_list,
+		     struct pblk_sec_meta *meta_list,
+		     unsigned int nr_secs, unsigned int valid_secs);
+int pblk_map_replace_lun(struct pblk *pblk);
 
 /* pblk write thread */
 int pblk_write_ts(void *data);

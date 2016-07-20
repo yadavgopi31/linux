@@ -103,12 +103,12 @@ static void pblk_requeue(struct work_struct *work)
 		pblk_make_rq(pblk->disk->queue, bio);
 }
 
-static void pblk_map_free(struct pblk *pblk)
+static void pblk_l2p_free(struct pblk *pblk)
 {
 	vfree(pblk->trans_map);
 }
 
-static int pblk_map_init(struct pblk *pblk)
+static int pblk_l2p_init(struct pblk *pblk)
 {
 	struct nvm_dev *dev = pblk->dev;
 	sector_t i;
@@ -347,12 +347,6 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 	if (!pblk->luns)
 		return -ENOMEM;
 
-	pblk->w_luns = kcalloc(pblk->nr_w_luns, sizeof(void *), GFP_KERNEL);
-	if (!pblk->luns) {
-		kfree(pblk->luns);
-		return -ENOMEM;
-	}
-
 	/* 1:1 mapping */
 	for (i = 0; i < pblk->nr_luns; i++) {
 		/* Align lun list to the channel each lun belongs to */
@@ -403,9 +397,11 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 		pblk->nr_secs += dev->sec_per_lun;
 	}
 
-	/* Set write luns in order to start with */
-	for (i = 0; i < pblk->nr_w_luns; i++)
-		pblk->w_luns[i] = &pblk->luns[i];
+	ret = pblk_map_init(pblk);
+	if (ret) {
+		kfree(pblk->luns);
+		goto err;
+	}
 
 	return 0;
 err:
@@ -434,11 +430,12 @@ static void pblk_area_free(struct pblk *pblk)
 
 static void pblk_free(struct pblk *pblk)
 {
-	pblk_map_free(pblk);
+	pblk_l2p_free(pblk);
 	pblk_core_free(pblk);
 	pblk_blk_pool_free(pblk);
 	pblk_luns_free(pblk);
 	pblk_area_free(pblk);
+	pblk_map_free(pblk);
 
 	kfree(pblk);
 }
@@ -863,12 +860,6 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 
 	pblk->nr_luns = lun_end - lun_begin + 1;
 
-	/* TODO: This should come from sysfs and be configurable */
-	pblk->nr_w_luns = pblk->nr_luns;
-
-	/* simple round-robin strategy */
-	atomic_set(&pblk->next_lun, -1);
-
 #ifdef CONFIG_NVM_DEBUG
 	atomic_set(&pblk->inflight_writes, 0);
 	atomic_set(&pblk->padded_writes, 0);
@@ -916,7 +907,7 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 		goto err;
 	}
 
-	ret = pblk_map_init(pblk);
+	ret = pblk_l2p_init(pblk);
 	if (ret) {
 		pr_err("pblk: could not initialize maps\n");
 		goto err;
