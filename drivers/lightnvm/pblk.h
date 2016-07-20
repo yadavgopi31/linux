@@ -330,6 +330,9 @@ struct pblk {
 	int nr_luns;
 	struct pblk_lun *luns;
 
+	int nr_w_luns;
+	struct pblk_lun **w_luns;
+
 	/* calculated values */
 	unsigned long long nr_secs;
 	unsigned long total_blocks;

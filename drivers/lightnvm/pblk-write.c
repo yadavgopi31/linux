@@ -21,7 +21,7 @@ static struct pblk_lun *get_next_lun(struct pblk *pblk)
 {
 	int next = atomic_inc_return(&pblk->next_lun);
 
-	return &pblk->luns[next % pblk->nr_luns];
+	return pblk->w_luns[next % pblk->nr_w_luns];
 }
 
 static struct pblk_lun *pblk_get_lun_rr(struct pblk *pblk, int is_gc)

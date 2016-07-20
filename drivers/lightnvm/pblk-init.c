@@ -347,6 +347,12 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 	if (!pblk->luns)
 		return -ENOMEM;
 
+	pblk->w_luns = kcalloc(pblk->nr_w_luns, sizeof(void *), GFP_KERNEL);
+	if (!pblk->luns) {
+		kfree(pblk->luns);
+		return -ENOMEM;
+	}
+
 	/* 1:1 mapping */
 	for (i = 0; i < pblk->nr_luns; i++) {
 		/* Align lun list to the channel each lun belongs to */
@@ -396,6 +402,10 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 		pblk->total_blocks += dev->blks_per_lun;
 		pblk->nr_secs += dev->sec_per_lun;
 	}
+
+	/* Set write luns in order to start with */
+	for (i = 0; i < pblk->nr_w_luns; i++)
+		pblk->w_luns[i] = &pblk->luns[i];
 
 	return 0;
 err:
@@ -852,6 +862,9 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	pblk->ts_writer = kthread_create(pblk_write_ts, pblk, "pblk-writer");
 
 	pblk->nr_luns = lun_end - lun_begin + 1;
+
+	/* TODO: This should come from sysfs and be configurable */
+	pblk->nr_w_luns = pblk->nr_luns;
 
 	/* simple round-robin strategy */
 	atomic_set(&pblk->next_lun, -1);
