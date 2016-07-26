@@ -670,66 +670,39 @@ static void gen_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 	spin_unlock(&vlun->lock);
 }
 
-static void gen_mark_blk(struct nvm_dev *dev, struct ppa_addr ppa, int type)
+static void gen_mark_blk(struct nvm_dev *dev, struct ppa_addr gen_ppa, int type)
 {
 	struct gen_dev *gn = dev->mp;
 	struct gen_lun *lun;
 	struct nvm_block *blk;
-	int ret;
 
-	pr_debug("gen: ppa  (ch: %u lun: %u blk: %u pg: %u) -> %u\n",
-			ppa.g.ch, ppa.g.lun, ppa.g.blk, ppa.g.pg, type);
+	pr_err("gen: ppa  (ch: %u lun: %u blk: %u pg: %u) -> %u\n",
+			gen_ppa.g.ch, gen_ppa.g.lun, gen_ppa.g.blk,
+			gen_ppa.g.pg, type);
 
-	if (unlikely(ppa.g.ch > dev->nr_chnls ||
-					ppa.g.lun > dev->luns_per_chnl ||
-					ppa.g.blk > dev->blks_per_lun)) {
+	if (unlikely(gen_ppa.g.ch > dev->nr_chnls ||
+					gen_ppa.g.lun > dev->luns_per_chnl ||
+					gen_ppa.g.blk > dev->blks_per_lun)) {
 		WARN_ON_ONCE(1);
 		pr_err("gen: ppa broken (ch: %u > %u lun: %u > %u blk: %u > %u",
-				ppa.g.ch, dev->nr_chnls,
-				ppa.g.lun, dev->luns_per_chnl,
-				ppa.g.blk, dev->blks_per_lun);
+				gen_ppa.g.ch, dev->nr_chnls,
+				gen_ppa.g.lun, dev->luns_per_chnl,
+				gen_ppa.g.blk, dev->blks_per_lun);
 		return;
 	}
 
-	lun = &gn->luns[(dev->luns_per_chnl * ppa.g.ch) + ppa.g.lun];
-	blk = &lun->vlun.blocks[ppa.g.blk];
+	lun = &gn->luns[(dev->luns_per_chnl * gen_ppa.g.ch) + gen_ppa.g.lun];
+	blk = &lun->vlun.blocks[gen_ppa.g.blk];
 
 	/* will be moved to bb list on put_blk from target */
 	blk->state = type;
-
-	ret = dev->ops->set_bb_tbl(dev, &ppa, 1, NVM_BLK_T_GRWN_BAD);
-	if (ret)
-		pr_err("gen: failed to mark bb (id:%lu)\n", blk->id);
-}
-
-/*
- * mark block bad in gen. It is expected that the target recovers separately
- */
-static void gen_mark_blk_bad(struct nvm_dev *dev, struct nvm_rq *rqd)
-{
-	int bit = -1;
-	int max_secs = dev->ops->max_phys_sect;
-	void *comp_bits = &rqd->ppa_status;
-
-	nvm_addr_to_generic_mode(dev, rqd);
-
-	/* look up blocks and mark them as bad */
-	if (rqd->nr_ppas == 1) {
-		gen_mark_blk(dev, rqd->ppa_addr, NVM_BLK_ST_BAD);
-		return;
-	}
-
-	while ((bit = find_next_bit(comp_bits, max_secs, bit + 1)) < max_secs)
-		gen_mark_blk(dev, rqd->ppa_list[bit], NVM_BLK_ST_BAD);
 }
 
 static void gen_end_io(struct nvm_rq *rqd)
 {
 	struct nvm_tgt_instance *ins = rqd->ins;
 
-	if (rqd->error == NVM_RSP_ERR_FAILWRITE)
-		gen_mark_blk_bad(rqd->dev, rqd);
-
+	/* Write failures and bad blocks are managed within the target */
 	ins->tt->end_io(rqd);
 }
 
