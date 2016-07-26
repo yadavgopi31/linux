@@ -670,7 +670,7 @@ static void gen_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 	spin_unlock(&vlun->lock);
 }
 
-static void gen_mark_blk(struct nvm_dev *dev, struct ppa_addr ppa, int type)
+static void __gen_mark_blk(struct nvm_dev *dev, struct ppa_addr ppa, int type)
 {
 	struct gen_dev *gn = dev->mp;
 	struct gen_lun *lun;
@@ -702,6 +702,18 @@ static void gen_mark_blk(struct nvm_dev *dev, struct ppa_addr ppa, int type)
 		pr_err("gen: failed to mark bb (id:%lu)\n", blk->id);
 }
 
+static void gen_mark_blk(struct nvm_dev *dev, struct ppa_addr ppa, int type)
+{
+	struct nvm_rq rqd;
+
+	/* Convert address space */
+	rqd.nr_ppas = 1;
+	rqd.ppa_addr = ppa;
+	nvm_generic_to_addr_mode(dev, &rqd);
+
+	return __gen_mark_blk(dev, rqd.ppa_addr, type);
+}
+
 /*
  * mark block bad in gen. It is expected that the target recovers separately
  */
@@ -711,16 +723,14 @@ static void gen_mark_blk_bad(struct nvm_dev *dev, struct nvm_rq *rqd)
 	int max_secs = dev->ops->max_phys_sect;
 	void *comp_bits = &rqd->ppa_status;
 
-	nvm_addr_to_generic_mode(dev, rqd);
-
 	/* look up blocks and mark them as bad */
 	if (rqd->nr_ppas == 1) {
-		gen_mark_blk(dev, rqd->ppa_addr, NVM_BLK_ST_BAD);
+		__gen_mark_blk(dev, rqd->ppa_addr, NVM_BLK_ST_BAD);
 		return;
 	}
 
 	while ((bit = find_next_bit(comp_bits, max_secs, bit + 1)) < max_secs)
-		gen_mark_blk(dev, rqd->ppa_list[bit], NVM_BLK_ST_BAD);
+		__gen_mark_blk(dev, rqd->ppa_list[bit], NVM_BLK_ST_BAD);
 }
 
 static void gen_end_io(struct nvm_rq *rqd)
