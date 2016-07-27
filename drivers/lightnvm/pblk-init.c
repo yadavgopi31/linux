@@ -576,17 +576,28 @@ static ssize_t pblk_sysfs_luns_active_show(struct pblk *pblk, char *page)
 {
 	ssize_t offset;
 
-	offset = sprintf(page, "luns_active");
+	offset = sprintf(page, "luns_active=%d\n",
+						pblk_map_get_active_luns(pblk));
 
-	/* implement luns active logic */
 	return offset;
 }
 
 static ssize_t pblk_sysfs_luns_active_store(struct pblk *pblk, const char *page,
 					    size_t len)
 {
-	/* implement luns active logic */
-	return 0;
+	int value;
+	size_t c_len;
+
+	c_len = strcspn(page, "\n");
+	if (c_len >= len) {
+		printk(KERN_CRIT "ERROR: clen:%lu, len:%lu\n", c_len, len);
+		return -EINVAL;
+	}
+
+	sscanf(page, "%d", &value);
+	pblk_map_set_active_luns(pblk, value);
+
+	return len;
 }
 
 static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *page)
@@ -823,7 +834,7 @@ static ssize_t pblk_sysfs_store(struct nvm_target *t, struct attribute *attr,
 {
 	struct pblk *pblk = t->disk->private_data;
 
-	if (strcmp(attr->name, "luns_active"))
+	if (!strcmp(attr->name, "luns_active"))
 		return pblk_sysfs_luns_active_store(pblk, buf, len);
 
 	return 0;

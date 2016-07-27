@@ -147,6 +147,45 @@ try_cur:
 	return ret;
 }
 
+ssize_t pblk_map_set_active_luns(struct pblk *pblk, int nr_luns)
+{
+	struct pblk_lun **luns;
+	ssize_t ret = 0;
+	int old_nr_luns;
+	int i;
+
+	spin_lock(&pblk->w_luns.lock);
+	old_nr_luns = pblk->w_luns.nr_luns;
+	pblk->w_luns.nr_luns = nr_luns;
+
+	luns = kcalloc(nr_luns, sizeof(void *), GFP_ATOMIC);
+	if (!luns) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	for (i = 0; i < old_nr_luns; i++)
+		luns[i] = pblk->w_luns.luns[i];
+
+	kfree(pblk->w_luns.luns);
+	pblk->w_luns.luns = luns;
+
+out:
+	spin_unlock(&pblk->w_luns.lock);
+	return ret;
+}
+
+int pblk_map_get_active_luns(struct pblk *pblk)
+{
+	int nr_luns;
+
+	spin_lock(&pblk->w_luns.lock);
+	nr_luns = pblk->w_luns.nr_luns;
+	spin_unlock(&pblk->w_luns.lock);
+
+	return nr_luns;
+}
+
 int pblk_map_init(struct pblk *pblk)
 {
 	int i;
