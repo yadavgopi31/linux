@@ -47,8 +47,21 @@ static ssize_t gen_target_attr_show(struct kobject *kobj,
 			attr->name);
 }
 
+static ssize_t gen_target_attr_store(struct kobject *kobj,
+				struct attribute *attr,
+				const char *page, size_t len)
+{
+	struct nvm_target *t = container_of(kobj, struct nvm_target, kobj);
+
+	if (t->type->sysfs_store)
+		return t->type->sysfs_store(t, attr, page, len);
+
+	return 0;
+}
+
 static const struct sysfs_ops target_sysfs_ops = {
 	.show = gen_target_attr_show,
+	.store = gen_target_attr_store,
 };
 
 static void gen_target_release(struct kobject *kobj)
