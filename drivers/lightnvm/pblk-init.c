@@ -572,6 +572,23 @@ err:
 	return -ENOMEM;
 }
 
+static ssize_t pblk_sysfs_luns_active_show(struct pblk *pblk, char *page)
+{
+	ssize_t offset;
+
+	offset = sprintf(page, "luns_active");
+
+	/* implement luns active logic */
+	return offset;
+}
+
+static ssize_t pblk_sysfs_luns_active_store(struct pblk *pblk, const char *page,
+					    size_t len)
+{
+	/* implement luns active logic */
+	return 0;
+}
+
 static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *page)
 {
 	ssize_t offset;
@@ -706,49 +723,55 @@ static ssize_t pblk_sysfs_block_pool(struct pblk *pblk, char *buf)
 }
 #endif
 
+static struct attribute sys_luns_active = {
+	.name = "luns_active",
+	.mode = S_IRUGO | S_IWUSR,
+};
+
 static struct attribute sys_write_max_attr = {
 	.name = "write_max",
-	.mode = S_IRUGO
+	.mode = S_IRUGO,
 };
 
 static struct attribute sys_stats_attr = {
 	.name = "stats",
-	.mode = S_IRUGO
+	.mode = S_IRUGO,
 };
 
 static struct attribute sys_inflight_writes_attr = {
 	.name = "inflight_writes",
-	.mode = S_IRUGO
+	.mode = S_IRUGO,
 };
 
 #ifdef CONFIG_NVM_DEBUG
 static struct attribute sys_stats_debug_attr = {
 	.name = "stats_debug",
-	.mode = S_IRUGO
+	.mode = S_IRUGO,
 };
 
 static struct attribute sys_open_blocks_attr = {
 	.name = "open",
-	.mode = S_IRUGO
+	.mode = S_IRUGO,
 };
 
 static struct attribute sys_bad_blocks_attr = {
 	.name = "bad",
-	.mode = S_IRUGO
+	.mode = S_IRUGO,
 };
 
 static struct attribute sys_rb_attr = {
 	.name = "write_buffer",
-	.mode = S_IRUGO
+	.mode = S_IRUGO,
 };
 
 static struct attribute sys_blk_pool_attr = {
 	.name = "block_pool",
-	.mode = S_IRUGO
+	.mode = S_IRUGO,
 };
 #endif
 
 static struct attribute *pblk_attrs[] = {
+	&sys_luns_active,
 	&sys_write_max_attr,
 	&sys_stats_attr,
 	&sys_inflight_writes_attr,
@@ -771,6 +794,8 @@ static ssize_t pblk_sysfs_show(struct nvm_target *t, struct attribute *attr,
 {
 	struct pblk *pblk = t->disk->private_data;
 
+	if (strcmp(attr->name, "luns_active") == 0)
+		return pblk_sysfs_luns_active_show(pblk, buf);
 	if (strcmp(attr->name, "stats") == 0)
 		return pblk_sysfs_stats(pblk, buf);
 	if (strcmp(attr->name, "write_max") == 0)
@@ -789,6 +814,17 @@ static ssize_t pblk_sysfs_show(struct nvm_target *t, struct attribute *attr,
 	else if (strcmp(attr->name, "block_pool") == 0)
 		return pblk_sysfs_block_pool(pblk, buf);
 #endif
+	return 0;
+}
+
+static ssize_t pblk_sysfs_store(struct nvm_target *t, struct attribute *attr,
+			        const char *buf, size_t len)
+{
+	struct pblk *pblk = t->disk->private_data;
+
+	if (strcmp(attr->name, "luns_active"))
+		return pblk_sysfs_luns_active_store(pblk, buf, len);
+
 	return 0;
 }
 
@@ -822,6 +858,7 @@ static struct nvm_tgt_type tt_pblk = {
 	.sysfs_init	= pblk_sysfs_init,
 	.sysfs_exit	= pblk_sysfs_exit,
 	.sysfs_show	= pblk_sysfs_show,
+	.sysfs_store	= pblk_sysfs_store,
 };
 
 static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
