@@ -309,6 +309,16 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 	return NVM_IO_OK;
 }
 
+int pblk_calc_max_wr_speed(struct pblk *pblk)
+{
+	struct nvm_dev *dev = pblk->dev;
+	int wr_per_sec = 1000000000 / dev->identity.groups[0].tprt;
+	int sect_per_sec = (wr_per_sec * dev->sec_per_pl * dev->nr_planes) >> 2;
+
+	/*TODO: divided by constant factor*/
+	return sect_per_sec * pblk->nr_luns / 4;
+}
+
 static void pblk_write_user_update(struct pblk *pblk)
 {
 	int i;
@@ -327,12 +337,12 @@ static void pblk_write_user_update(struct pblk *pblk)
 	low = pblk->total_blocks / PBLK_USER_LOW_THRS;
 
 	if (avail > high)
-		pblk->write_cur_speed = PBLK_USER_MAX_SPEED;
+		pblk->write_cur_speed = pblk->write_max_speed;
 	else if (avail > low && avail < high)
 	{
 		/* redo to power of two calculations */
 		int perc = ((avail * 100)) / (high - low);
-		pblk->write_cur_speed = (PBLK_USER_MAX_SPEED / 100) * perc;
+		pblk->write_cur_speed = (pblk->write_max_speed / 100) * perc;
 	} else {
 		pblk->write_cur_speed = 0;
 	}

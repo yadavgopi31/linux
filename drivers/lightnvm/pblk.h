@@ -37,7 +37,6 @@
 #define PBLK_SECTOR (512)
 #define PBLK_EXPOSED_PAGE_SIZE (4096)
 #define PBLK_MAX_REQ_ADDRS (64)
-#define PBLK_MAX_CH_INFLIGHT_IOS (4)
 
 #define NR_PHY_IN_LOG (PBLK_EXPOSED_PAGE_SIZE / PBLK_SECTOR)
 
@@ -366,7 +365,6 @@ struct pblk {
 	int write_cnt;
 
 	/* User write control */
-#define PBLK_USER_MAX_SPEED 400000
 #define PBLK_USER_LOW_THRS 50	/* full stop at 2 percent of available
 				 * blocks
 				 */
@@ -374,6 +372,7 @@ struct pblk {
 				 * available blks
 				 */
 	int write_cur_speed;
+	int write_max_speed;
 
 	/* capacity of devices when bad blocks are subtracted */
 	sector_t capacity;
@@ -551,6 +550,7 @@ int pblk_write_list_to_cache(struct pblk *pblk, struct bio *bio,
 			     unsigned int nr_rec_secs,
 			     unsigned long flags,
 			     struct pblk_block *gc_rblk);
+int pblk_calc_max_wr_speed(struct pblk *pblk);
 
 /* pblk map */
 int pblk_map_init(struct pblk *pblk);

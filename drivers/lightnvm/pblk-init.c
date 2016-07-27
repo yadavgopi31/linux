@@ -624,7 +624,8 @@ static ssize_t pblk_sysfs_write_max(struct pblk *pblk, char *page)
 	unsigned int avail = pblk_get_avail_blks(pblk);
 
 	return sprintf(page, "%uKBs (max:%dKBs, stop:<%lu, fullspd:>%lu, avail:%u)\n",
-				pblk->write_cur_speed*4, PBLK_USER_MAX_SPEED*4,
+				pblk->write_cur_speed * 4,
+				pblk_calc_max_wr_speed(pblk) * 4,
 				pblk->total_blocks / PBLK_USER_LOW_THRS,
 				pblk->total_blocks / PBLK_USER_HIGH_THRS,
 				avail);
@@ -936,7 +937,8 @@ static void *pblk_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	pblk->blk_meta.bitmap_len =
 		BITS_TO_LONGS(pblk->nr_blk_dsecs) * sizeof(unsigned long);
 
-	pblk->write_cur_speed = PBLK_USER_MAX_SPEED;
+	pblk->write_cur_speed = pblk->write_max_speed =
+						pblk_calc_max_wr_speed(pblk);
 
 	ret = pblk_core_init(pblk);
 	if (ret) {
