@@ -467,10 +467,21 @@ out:
 
 void pblk_recov_clean_bb_list(struct pblk *pblk, struct pblk_lun *rlun)
 {
+	struct nvm_dev *dev = pblk->dev;
 	struct pblk_block *rblk, *trblk;
+	struct ppa_addr ppa, gen_ppa;
+	LIST_HEAD(bb_list);
 
 	spin_lock(&rlun->lock_lists);
-	list_for_each_entry_safe(rblk, trblk, &rlun->bb_list, list) {
+	list_cut_position(&bb_list, &rlun->bb_list, rlun->bb_list.prev);
+	spin_unlock(&rlun->lock_lists);
+
+	list_for_each_entry_safe(rblk, trblk, &bb_list, list) {
+		ppa = pblk_ppa_to_gaddr(dev, block_to_addr(pblk, rblk));
+		gen_ppa = generic_to_dev_addr(dev, ppa);
+
+		nvm_set_bb_tbl(dev, &gen_ppa, 1, NVM_BLK_T_GRWN_BAD);
+
 		/* As sectors are recovered, the bitmap representing valid
 		 * mapped pages is emptied
 		 */
@@ -479,7 +490,7 @@ void pblk_recov_clean_bb_list(struct pblk *pblk, struct pblk_lun *rlun)
 			pblk_put_blk_unlocked(pblk, rblk);
 		spin_unlock(&rblk->lock);
 	}
-	spin_unlock(&rlun->lock_lists);
+
 }
 
 struct nvm_rq *pblk_setup_close_rblk(struct pblk *pblk, struct pblk_block *rblk,

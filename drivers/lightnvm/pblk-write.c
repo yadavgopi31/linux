@@ -536,6 +536,7 @@ retry:
  */
 static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 {
+	struct nvm_dev *dev = pblk->dev;
 	void *comp_bits = &rqd->ppa_status;
 	struct pblk_ctx *ctx = pblk_set_ctx(pblk, rqd);
 	struct pblk_compl_ctx *c_ctx = ctx->c_ctx;
@@ -603,6 +604,9 @@ static void pblk_end_w_fail(struct pblk *pblk, struct nvm_rq *rqd)
 		if (ppa_cmp_blk(ppa, prev_ppa))
 			continue;
 
+		/* Mark block as bad in the media manager */
+		nvm_mark_blk(dev, ppa, NVM_BLK_ST_BAD);
+
 		prev_ppa.ppa = ppa.ppa;
 		pblk_run_recovery(pblk, w_ctx->ppa.rblk);
 	}
@@ -620,10 +624,13 @@ out:
 
 void pblk_end_io_write(struct pblk *pblk, struct nvm_rq *rqd)
 {
+	struct nvm_dev *dev = pblk->dev;
 	struct pblk_ctx *ctx;
 
-	if (rqd->error == NVM_RSP_ERR_FAILWRITE)
+	if (rqd->error == NVM_RSP_ERR_FAILWRITE) {
+		nvm_addr_to_generic_mode(dev, rqd);
 		return pblk_end_w_fail(pblk, rqd);
+	}
 
 	ctx = pblk_set_ctx(pblk, rqd);
 

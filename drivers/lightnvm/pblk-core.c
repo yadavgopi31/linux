@@ -552,7 +552,6 @@ struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun)
 	struct pblk_block *rblk;
 	struct pblk_blk_rec_lpg *rlpg;
 
-
 retry:
 	blk = nvm_get_blk(pblk->dev, lun);
 	if (!blk)
@@ -569,11 +568,14 @@ retry:
 	 * do this when as part of the GC scheduler
 	 */
 	if (nvm_erase_blk(dev, rblk->parent, pblk_set_progr_mode(pblk))) {
-		struct ppa_addr ppa;
+		struct ppa_addr ppa, gen_ppa;;
 
 		/* Mark block as bad and return it to media manager */
 		ppa = pblk_ppa_to_gaddr(dev, block_to_addr(pblk, rblk));
+		gen_ppa = generic_to_dev_addr(dev, ppa);
+
 		nvm_mark_blk(dev, ppa, NVM_BLK_ST_BAD);
+		nvm_set_bb_tbl(dev, &gen_ppa, 1, NVM_BLK_T_GRWN_BAD);
 		pblk_retire_blk(pblk, rblk);
 
 		inc_stat(pblk, &pblk->erase_failed, 0);
