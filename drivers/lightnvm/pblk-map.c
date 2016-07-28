@@ -151,7 +151,7 @@ ssize_t pblk_map_set_active_luns(struct pblk *pblk, int nr_luns)
 {
 	struct pblk_lun **luns;
 	ssize_t ret = 0;
-	int old_nr_luns;
+	int old_nr_luns, cpy_luns;
 	int i;
 
 	spin_lock(&pblk->w_luns.lock);
@@ -164,11 +164,16 @@ ssize_t pblk_map_set_active_luns(struct pblk *pblk, int nr_luns)
 		goto out;
 	}
 
-	for (i = 0; i < old_nr_luns; i++)
+	cpy_luns = (old_nr_luns > nr_luns) ? nr_luns : old_nr_luns;
+
+	for (i = 0; i < cpy_luns; i++)
 		luns[i] = pblk->w_luns.luns[i];
 
 	kfree(pblk->w_luns.luns);
 	pblk->w_luns.luns = luns;
+
+	for (i = cpy_luns; i < nr_luns; i++)
+		pblk->w_luns.luns[i] = &pblk->luns[++pblk->w_luns.next_lun];
 
 out:
 	spin_unlock(&pblk->w_luns.lock);
