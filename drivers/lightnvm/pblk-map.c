@@ -24,19 +24,6 @@
 
 #include "pblk.h"
 
-static int pblk_map_next_lun(struct pblk *pblk)
-{
-	int lun_pos;
-
-	spin_lock(&pblk->w_luns.lock);
-	lun_pos = ++pblk->w_luns.next_w_lun;
-	if (pblk->w_luns.next_w_lun == pblk->w_luns.nr_luns)
-		lun_pos = pblk->w_luns.next_w_lun = 0;
-	spin_unlock(&pblk->w_luns.lock);
-
-	return lun_pos;
-}
-
 int pblk_map_replace_lun(struct pblk *pblk)
 {
 	int next_lun;
@@ -57,9 +44,17 @@ int pblk_map_replace_lun(struct pblk *pblk)
 
 static struct pblk_lun *get_map_next_lun(struct pblk *pblk, int *lun_pos)
 {
-	*lun_pos = pblk_map_next_lun(pblk);
+	struct pblk_lun *rlun;
 
-	return pblk->w_luns.luns[*lun_pos];
+	spin_lock(&pblk->w_luns.lock);
+	*lun_pos = ++pblk->w_luns.next_w_lun;
+	if (pblk->w_luns.next_w_lun == pblk->w_luns.nr_luns)
+		*lun_pos = pblk->w_luns.next_w_lun = 0;
+
+	rlun = pblk->w_luns.luns[*lun_pos];
+	spin_unlock(&pblk->w_luns.lock);
+
+	return rlun;
 }
 
 static struct pblk_lun *pblk_map_get_lun_rr(struct pblk *pblk, int *lun_pos,
@@ -174,6 +169,8 @@ ssize_t pblk_map_set_active_luns(struct pblk *pblk, int nr_luns)
 
 	for (i = cpy_luns; i < nr_luns; i++)
 		pblk->w_luns.luns[i] = &pblk->luns[++pblk->w_luns.next_lun];
+
+	pblk->w_luns.next_w_lun = -1;
 
 out:
 	spin_unlock(&pblk->w_luns.lock);
