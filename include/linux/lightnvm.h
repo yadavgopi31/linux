@@ -556,7 +556,9 @@ extern struct nvm_dev *nvm_alloc_dev(int);
 extern int nvm_register(struct nvm_dev *);
 extern void nvm_unregister(struct nvm_dev *);
 
-void nvm_mark_blk(struct nvm_dev *dev, struct ppa_addr ppa, int type);
+extern void nvm_mark_blk(struct nvm_dev *dev, struct ppa_addr ppa, int type);
+extern int nvm_set_bb_tbl(struct nvm_dev *dev, struct ppa_addr *ppas,
+							int nr_ppas, int type);
 
 extern int nvm_submit_io(struct nvm_dev *, struct nvm_rq *);
 extern void nvm_generic_to_addr_mode(struct nvm_dev *, struct nvm_rq *);
