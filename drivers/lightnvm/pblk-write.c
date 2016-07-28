@@ -157,19 +157,7 @@ int pblk_replace_blk(struct pblk *pblk, struct pblk_block *rblk,
 		return 0;
 
 	pblk_set_lun_cur(rlun, rblk);
-
-	if (lun_pos >= 0 && pblk->w_luns.nr_luns < pblk->nr_luns) {
-		int next_lun;
-
-		spin_lock(&pblk->w_luns.lock);
-			next_lun = pblk_map_replace_lun(pblk);
-			pblk->w_luns.luns[lun_pos] = &pblk->luns[next_lun];
-		spin_unlock(&pblk->w_luns.lock);
-
-		return 0;
-	}
-
-	return 1;
+	return pblk_map_replace_lun(pblk, lun_pos);
 }
 
 int pblk_write_setup_s(struct pblk *pblk, struct nvm_rq *rqd,

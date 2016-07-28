@@ -24,22 +24,32 @@
 
 #include "pblk.h"
 
-int pblk_map_replace_lun(struct pblk *pblk)
+int __pblk_map_replace_lun(struct pblk *pblk, int lun_pos)
 {
 	int next_lun;
 
-#ifdef CONFIG_NVM_DEBUG
-	lockdep_assert_held(&pblk->w_luns.lock);
-
-	if (pblk->w_luns.nr_luns == pblk->nr_luns)
+	if (unlikely(lun_pos < 0 || lun_pos >= pblk->w_luns.nr_luns)) {
 		pr_err("pblk: corrupt mapping\n");
-#endif
+		return 0;
+	}
 
 	next_lun = ++pblk->w_luns.next_lun;
 	if (pblk->w_luns.next_lun == pblk->nr_luns)
 		next_lun = pblk->w_luns.next_lun = 0;
 
-	return next_lun;
+	pblk->w_luns.luns[lun_pos] = &pblk->luns[next_lun];
+	return 1;
+}
+
+int pblk_map_replace_lun(struct pblk *pblk, int lun_pos)
+{
+	int ret;
+
+	spin_lock(&pblk->w_luns.lock);
+	ret = __pblk_map_replace_lun(pblk, lun_pos);
+	spin_unlock(&pblk->w_luns.lock);
+
+	return ret;
 }
 
 static struct pblk_lun *get_map_next_lun(struct pblk *pblk, int *lun_pos)
@@ -121,7 +131,7 @@ try_cur:
 
 	/* Account for grown bad blocks */
 	if (unlikely(block_is_bad(rblk))) {
-		if (!pblk_replace_blk(pblk, rblk, rlun, -1)) {
+		if (!pblk_replace_blk(pblk, rblk, rlun, lun_pos)) {
 			spin_unlock(&rlun->lock);
 			goto try_lun;
 		}
@@ -168,7 +178,8 @@ ssize_t pblk_map_set_active_luns(struct pblk *pblk, int nr_luns)
 	pblk->w_luns.luns = luns;
 
 	for (i = cpy_luns; i < nr_luns; i++)
-		pblk->w_luns.luns[i] = &pblk->luns[++pblk->w_luns.next_lun];
+		if (!__pblk_map_replace_lun(pblk, i))
+			goto out;
 
 	pblk->w_luns.next_w_lun = -1;
 
