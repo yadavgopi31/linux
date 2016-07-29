@@ -569,6 +569,8 @@ int pblk_map_rr_page(struct pblk *pblk, unsigned int sentry,
 int pblk_map_replace_lun(struct pblk *pblk, int lun_pos);
 ssize_t pblk_map_set_active_luns(struct pblk *pblk, int nr_luns);
 int pblk_map_get_active_luns(struct pblk *pblk);
+int pblk_map_set_consume_blocks(struct pblk *pblk, int value);
+int pblk_map_get_consume_blocks(struct pblk *pblk);
 
 /* pblk write thread */
 int pblk_write_ts(void *data);

@@ -231,6 +231,26 @@ int pblk_map_get_active_luns(struct pblk *pblk)
 	return nr_luns;
 }
 
+int pblk_map_set_consume_blocks(struct pblk *pblk, int value)
+{
+	spin_lock(&pblk->w_luns.lock);
+	pblk->w_luns.nr_blocks = value;
+	spin_unlock(&pblk->w_luns.lock);
+
+	return 0;
+}
+
+int pblk_map_get_consume_blocks(struct pblk *pblk)
+{
+	int nr_blocks;
+
+	spin_lock(&pblk->w_luns.lock);
+	nr_blocks = pblk->w_luns.nr_blocks;
+	spin_unlock(&pblk->w_luns.lock);
+
+	return nr_blocks;
+}
+
 int pblk_map_init(struct pblk *pblk)
 {
 	int i;
