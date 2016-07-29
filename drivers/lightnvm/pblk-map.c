@@ -14,8 +14,7 @@
  *
  * pblk-map.c - pblk's lba-ppa mapping strategy
  *
- * TODO: Expose through sysfs for:
- *   - Select number of writable luns
+ * TODO:
  *   - Choose strategy:
  *     - Stripe across writable luns
  *     - Write to one block (one lun) at a time
@@ -210,7 +209,6 @@ int pblk_map_init(struct pblk *pblk)
 {
 	int i;
 
-	/* TODO: This should come from sysfs and be configurable */
 	pblk->w_luns.nr_luns = pblk->nr_luns;
 	pblk->w_luns.next_lun = -1;
 	pblk->w_luns.next_w_lun = -1;
