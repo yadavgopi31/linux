@@ -731,6 +731,7 @@ struct nvm_dev *nvm_alloc_dev(int node)
 {
 	return kzalloc_node(sizeof(struct nvm_dev), GFP_KERNEL, node);
 }
+EXPORT_SYMBOL(nvm_alloc_dev);
 
 int nvm_register(struct nvm_dev *dev)
 {
