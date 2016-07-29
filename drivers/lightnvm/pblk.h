@@ -316,7 +316,14 @@ struct pblk_blk_pool {
 /* Write strategy */
 struct pblk_w_luns {
 	int nr_luns;		/* Number of writable luns */
+	int nr_blocks;		/* Number of blocks to be consumed per lun. -1
+				 * signals that the lun must not change and
+				 * consume only blocks from the set luns. Active
+				 * luns can be then set through sysfs
+				 */
+
 	struct pblk_lun **luns; /* Pointers to writable luns */
+	int *lun_blocks;	/* Consumed blocks per lun */
 
 	int next_w_lun;		/* Whenever sector is written, this is updated
 				 * to point to the next write lun

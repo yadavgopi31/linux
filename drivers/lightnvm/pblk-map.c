@@ -27,6 +27,9 @@ int __pblk_map_replace_lun(struct pblk *pblk, int lun_pos)
 {
 	int next_lun;
 
+	if (lun_pos > pblk->w_luns.nr_luns)
+		return 1;
+
 	if (unlikely(lun_pos < 0 || lun_pos >= pblk->w_luns.nr_luns)) {
 		pr_err("pblk: corrupt mapping\n");
 		return 0;
@@ -42,10 +45,18 @@ int __pblk_map_replace_lun(struct pblk *pblk, int lun_pos)
 
 int pblk_map_replace_lun(struct pblk *pblk, int lun_pos)
 {
-	int ret;
+	int ret = 1;
 
 	spin_lock(&pblk->w_luns.lock);
-	ret = __pblk_map_replace_lun(pblk, lun_pos);
+	if (unlikely(pblk->w_luns.nr_blocks == -1))
+		goto out;
+
+	if (++pblk->w_luns.lun_blocks[lun_pos] >= pblk->w_luns.nr_blocks) {
+		ret = __pblk_map_replace_lun(pblk, lun_pos);
+		pblk->w_luns.lun_blocks[lun_pos] = 0;
+	}
+
+out:
 	spin_unlock(&pblk->w_luns.lock);
 
 	return ret;
@@ -154,6 +165,7 @@ try_cur:
 ssize_t pblk_map_set_active_luns(struct pblk *pblk, int nr_luns)
 {
 	struct pblk_lun **luns;
+	int *lun_blocks;
 	ssize_t ret = 0;
 	int old_nr_luns, cpy_luns;
 	int i;
@@ -175,17 +187,31 @@ ssize_t pblk_map_set_active_luns(struct pblk *pblk, int nr_luns)
 		goto out;
 	}
 
+	lun_blocks = kcalloc(nr_luns, sizeof(int), GFP_ATOMIC);
+	if (!lun_blocks) {
+		kfree(luns);
+		ret = -ENOMEM;
+		goto out;
+	}
+
 	cpy_luns = (old_nr_luns > nr_luns) ? nr_luns : old_nr_luns;
 
-	for (i = 0; i < cpy_luns; i++)
+	for (i = 0; i < cpy_luns; i++) {
 		luns[i] = pblk->w_luns.luns[i];
+		lun_blocks[i] = pblk->w_luns.lun_blocks[i];
+	}
 
 	kfree(pblk->w_luns.luns);
-	pblk->w_luns.luns = luns;
+	kfree(pblk->w_luns.lun_blocks);
 
-	for (i = cpy_luns; i < nr_luns; i++)
+	pblk->w_luns.luns = luns;
+	pblk->w_luns.lun_blocks = lun_blocks;
+
+	for (i = cpy_luns; i < nr_luns; i++) {
+		pblk->w_luns.lun_blocks[i] = 0;
 		if (!__pblk_map_replace_lun(pblk, i))
 			goto out;
+	}
 
 	pblk->w_luns.next_w_lun = -1;
 
@@ -210,19 +236,30 @@ int pblk_map_init(struct pblk *pblk)
 	int i;
 
 	pblk->w_luns.nr_luns = pblk->nr_luns;
+	pblk->w_luns.nr_blocks = 1;
+
 	pblk->w_luns.next_lun = -1;
 	pblk->w_luns.next_w_lun = -1;
 
 	pblk->w_luns.luns = kcalloc(pblk->w_luns.nr_luns, sizeof(void *),
 								GFP_KERNEL);
-	if (!pblk->luns)
+	if (!pblk->w_luns.luns)
 		return -ENOMEM;
+
+	pblk->w_luns.lun_blocks = kcalloc(pblk->w_luns.nr_luns, sizeof(int),
+								GFP_KERNEL);
+	if (!pblk->w_luns.lun_blocks) {
+		kfree(pblk->w_luns.luns);
+		return -ENOMEM;
+	}
 
 	spin_lock_init(&pblk->w_luns.lock);
 
 	/* Set write luns in order to start with */
-	for (i = 0; i < pblk->w_luns.nr_luns; i++)
+	for (i = 0; i < pblk->w_luns.nr_luns; i++) {
 		pblk->w_luns.luns[i] = &pblk->luns[i];
+		pblk->w_luns.lun_blocks[i] = 0;
+	}
 
 	return 0;
 }
