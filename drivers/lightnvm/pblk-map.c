@@ -160,6 +160,13 @@ ssize_t pblk_map_set_active_luns(struct pblk *pblk, int nr_luns)
 	int i;
 
 	spin_lock(&pblk->w_luns.lock);
+	if (nr_luns > pblk->nr_luns) {
+		pr_err("pblk: Not enough luns (%d > %d)\n",
+						nr_luns, pblk->nr_luns);
+		ret = -EINVAL;
+		goto out;
+	}
+
 	old_nr_luns = pblk->w_luns.nr_luns;
 	pblk->w_luns.nr_luns = nr_luns;
 
