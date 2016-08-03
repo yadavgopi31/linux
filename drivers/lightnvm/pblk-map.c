@@ -109,6 +109,17 @@ static struct pblk_lun *pblk_map_get_lun_rr(struct pblk *pblk, int *lun_pos,
 	return max_free;
 }
 
+int pblk_replace_blk(struct pblk *pblk, struct pblk_block *rblk,
+		     struct pblk_lun *rlun, int lun_pos)
+{
+	rblk = pblk_blk_pool_get(pblk, rlun);
+	if (!rblk)
+		return 0;
+
+	pblk_set_lun_cur(rlun, rblk);
+	return pblk_map_replace_lun(pblk, lun_pos);
+}
+
 /* Simple round-robin Logical to physical address translation.
  *
  * Retrieve the mapping using the active append point. Then update the ap for
@@ -160,95 +171,6 @@ try_cur:
 
 	spin_unlock(&rlun->lock);
 	return ret;
-}
-
-ssize_t pblk_map_set_active_luns(struct pblk *pblk, int nr_luns)
-{
-	struct pblk_lun **luns;
-	int *lun_blocks;
-	ssize_t ret = 0;
-	int old_nr_luns, cpy_luns;
-	int i;
-
-	spin_lock(&pblk->w_luns.lock);
-	if (nr_luns > pblk->nr_luns) {
-		pr_err("pblk: Not enough luns (%d > %d)\n",
-						nr_luns, pblk->nr_luns);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	old_nr_luns = pblk->w_luns.nr_luns;
-	pblk->w_luns.nr_luns = nr_luns;
-
-	luns = kcalloc(nr_luns, sizeof(void *), GFP_ATOMIC);
-	if (!luns) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	lun_blocks = kcalloc(nr_luns, sizeof(int), GFP_ATOMIC);
-	if (!lun_blocks) {
-		kfree(luns);
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	cpy_luns = (old_nr_luns > nr_luns) ? nr_luns : old_nr_luns;
-
-	for (i = 0; i < cpy_luns; i++) {
-		luns[i] = pblk->w_luns.luns[i];
-		lun_blocks[i] = pblk->w_luns.lun_blocks[i];
-	}
-
-	kfree(pblk->w_luns.luns);
-	kfree(pblk->w_luns.lun_blocks);
-
-	pblk->w_luns.luns = luns;
-	pblk->w_luns.lun_blocks = lun_blocks;
-
-	for (i = cpy_luns; i < nr_luns; i++) {
-		pblk->w_luns.lun_blocks[i] = 0;
-		if (!__pblk_map_replace_lun(pblk, i))
-			goto out;
-	}
-
-	pblk->w_luns.next_w_lun = -1;
-
-out:
-	spin_unlock(&pblk->w_luns.lock);
-	return ret;
-}
-
-int pblk_map_get_active_luns(struct pblk *pblk)
-{
-	int nr_luns;
-
-	spin_lock(&pblk->w_luns.lock);
-	nr_luns = pblk->w_luns.nr_luns;
-	spin_unlock(&pblk->w_luns.lock);
-
-	return nr_luns;
-}
-
-int pblk_map_set_consume_blocks(struct pblk *pblk, int value)
-{
-	spin_lock(&pblk->w_luns.lock);
-	pblk->w_luns.nr_blocks = value;
-	spin_unlock(&pblk->w_luns.lock);
-
-	return 0;
-}
-
-int pblk_map_get_consume_blocks(struct pblk *pblk)
-{
-	int nr_blocks;
-
-	spin_lock(&pblk->w_luns.lock);
-	nr_blocks = pblk->w_luns.nr_blocks;
-	spin_unlock(&pblk->w_luns.lock);
-
-	return nr_blocks;
 }
 
 int pblk_map_init(struct pblk *pblk)

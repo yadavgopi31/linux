@@ -572,56 +572,6 @@ err:
 	return -ENOMEM;
 }
 
-static ssize_t pblk_sysfs_luns_active_show(struct pblk *pblk, char *page)
-{
-	return sprintf(page, "luns_active=%d\n",
-					pblk_map_get_active_luns(pblk));
-}
-
-static ssize_t pblk_sysfs_luns_active_store(struct pblk *pblk, const char *page,
-					    size_t len)
-{
-	size_t c_len;
-	int value;
-	int ret;
-
-	c_len = strcspn(page, "\n");
-	if (c_len >= len)
-		return -EINVAL;
-
-	sscanf(page, "%d", &value);
-	ret = pblk_map_set_active_luns(pblk, value);
-	if (ret)
-		return ret;
-
-	return len;
-}
-
-static ssize_t pblk_sysfs_consume_blocks_show(struct pblk *pblk, char *page)
-{
-	return sprintf(page, "consume_blocks=%d\n",
-					pblk_map_get_consume_blocks(pblk));
-}
-
-static ssize_t pblk_sysfs_consume_blocks_store(struct pblk *pblk,
-					       const char *page, size_t len)
-{
-	size_t c_len;
-	int value;
-	int ret;
-
-	c_len = strcspn(page, "\n");
-	if (c_len >= len)
-		return -EINVAL;
-
-	sscanf(page, "%d", &value);
-	ret = pblk_map_set_consume_blocks(pblk, value);
-	if (ret)
-		return ret;
-
-	return len;
-}
-
 static ssize_t pblk_sysfs_stats(struct pblk *pblk, char *page)
 {
 	ssize_t offset;
@@ -757,16 +707,6 @@ static ssize_t pblk_sysfs_block_pool(struct pblk *pblk, char *buf)
 }
 #endif
 
-static struct attribute sys_luns_active = {
-	.name = "luns_active",
-	.mode = S_IRUGO | S_IWUSR,
-};
-
-static struct attribute sys_consume_blocks = {
-	.name = "consume_blocks",
-	.mode = S_IRUGO | S_IWUSR,
-};
-
 static struct attribute sys_write_max_attr = {
 	.name = "write_max",
 	.mode = S_IRUGO,
@@ -810,8 +750,6 @@ static struct attribute sys_blk_pool_attr = {
 #endif
 
 static struct attribute *pblk_attrs[] = {
-	&sys_luns_active,
-	&sys_consume_blocks,
 	&sys_write_max_attr,
 	&sys_stats_attr,
 	&sys_inflight_writes_attr,
@@ -834,11 +772,7 @@ static ssize_t pblk_sysfs_show(struct nvm_target *t, struct attribute *attr,
 {
 	struct pblk *pblk = t->disk->private_data;
 
-	if (strcmp(attr->name, "luns_active") == 0)
-		return pblk_sysfs_luns_active_show(pblk, buf);
-	else if (strcmp(attr->name, "consume_blocks") == 0)
-		return pblk_sysfs_consume_blocks_show(pblk, buf);
-	else if (strcmp(attr->name, "stats") == 0)
+	if (strcmp(attr->name, "stats") == 0)
 		return pblk_sysfs_stats(pblk, buf);
 	else if (strcmp(attr->name, "write_max") == 0)
 		return pblk_sysfs_write_max(pblk, buf);
@@ -862,13 +796,6 @@ static ssize_t pblk_sysfs_show(struct nvm_target *t, struct attribute *attr,
 static ssize_t pblk_sysfs_store(struct nvm_target *t, struct attribute *attr,
 			        const char *buf, size_t len)
 {
-	struct pblk *pblk = t->disk->private_data;
-
-	if (strcmp(attr->name, "luns_active") == 0)
-		return pblk_sysfs_luns_active_store(pblk, buf, len);
-	else if (strcmp(attr->name, "consume_blocks") == 0)
-		return pblk_sysfs_consume_blocks_store(pblk, buf, len);
-
 	return 0;
 }
 

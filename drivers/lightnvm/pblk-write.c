@@ -149,17 +149,6 @@ int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 	return 0;
 }
 
-int pblk_replace_blk(struct pblk *pblk, struct pblk_block *rblk,
-		     struct pblk_lun *rlun, int lun_pos)
-{
-	rblk = pblk_blk_pool_get(pblk, rlun);
-	if (!rblk)
-		return 0;
-
-	pblk_set_lun_cur(rlun, rblk);
-	return pblk_map_replace_lun(pblk, lun_pos);
-}
-
 int pblk_write_setup_s(struct pblk *pblk, struct nvm_rq *rqd,
 		       struct pblk_ctx *ctx, struct pblk_sec_meta *meta)
 {
@@ -405,11 +394,10 @@ int pblk_write_ts(void *data)
 {
 	struct pblk *pblk = data;
 
-	/* while (!kthread_should_stop()) { */
-	while(1) {
+	while (!kthread_should_stop()) {
 		if (!pblk_submit_write(pblk))
 			continue;
-		/* set_current_state(TASK_INTERRUPTIBLE); */
+		set_current_state(TASK_INTERRUPTIBLE);
 		io_schedule();
 	}
 
