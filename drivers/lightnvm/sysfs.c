@@ -35,6 +35,12 @@ static ssize_t nvm_dev_attr_show(struct device *dev,
 			id->ppaf.blk_offset, id->ppaf.blk_len,
 			id->ppaf.pg_offset, id->ppaf.pg_len,
 			id->ppaf.sect_offset, id->ppaf.sect_len);
+	} else if (strcmp(attr->name, "fpg_size") == 0) {	/* int */
+		return scnprintf(page, PAGE_SIZE, "%d\n", ndev->fpg_size);
+	} else if (strcmp(attr->name, "sec_size") == 0) {
+		return scnprintf(page, PAGE_SIZE, "%d\n", ndev->sec_size);
+	} else if (strcmp(attr->name, "sec_per_pg") == 0) {
+		return scnprintf(page, PAGE_SIZE, "%d\n", ndev->sec_per_pg);
 	} else if (strcmp(attr->name, "media_type") == 0) {	/* u8 */
 		return scnprintf(page, PAGE_SIZE, "%u\n", grp->mtype);
 	} else if (strcmp(attr->name, "flash_media_type") == 0) {
@@ -71,6 +77,12 @@ static ssize_t nvm_dev_attr_show(struct device *dev,
 		return scnprintf(page, PAGE_SIZE, "0x%08x\n", grp->mpos);
 	} else if (strcmp(attr->name, "media_capabilities") == 0) {
 		return scnprintf(page, PAGE_SIZE, "0x%08x\n", grp->mccap);
+	} else if (strcmp(attr->name, "max_phys_sect") == 0) {
+		if (!ndev->ops) {
+			return scnprintf(page, PAGE_SIZE, "%u\n", 0);
+		}
+		return scnprintf(page, PAGE_SIZE, "%u\n",
+				 ndev->ops->max_phys_sect);
 	} else if (strcmp(attr->name, "channel_parallelism") == 0) {/* u16 */
 		return scnprintf(page, PAGE_SIZE, "%u\n", grp->cpar);
 	} else {
@@ -88,8 +100,12 @@ static NVM_DEV_ATTR_RO(version);
 static NVM_DEV_ATTR_RO(vendor_opcode);
 static NVM_DEV_ATTR_RO(capabilities);
 static NVM_DEV_ATTR_RO(device_mode);
-static NVM_DEV_ATTR_RO(ppa_format);
 static NVM_DEV_ATTR_RO(media_manager);
+static NVM_DEV_ATTR_RO(ppa_format);
+
+static NVM_DEV_ATTR_RO(fpg_size);
+static NVM_DEV_ATTR_RO(sec_size);
+static NVM_DEV_ATTR_RO(sec_per_pg);
 
 static NVM_DEV_ATTR_RO(media_type);
 static NVM_DEV_ATTR_RO(flash_media_type);
@@ -109,6 +125,7 @@ static NVM_DEV_ATTR_RO(erase_typ);
 static NVM_DEV_ATTR_RO(erase_max);
 static NVM_DEV_ATTR_RO(multiplane_modes);
 static NVM_DEV_ATTR_RO(media_capabilities);
+static NVM_DEV_ATTR_RO(max_phys_sect);
 static NVM_DEV_ATTR_RO(channel_parallelism);
 
 #define NVM_DEV_ATTR(_name) (dev_attr_##_name##)
@@ -119,8 +136,12 @@ static struct attribute *nvm_dev_attrs[] = {
 	&dev_attr_capabilities.attr,
 	&dev_attr_device_mode.attr,
 	&dev_attr_media_manager.attr,
-
 	&dev_attr_ppa_format.attr,
+
+	&dev_attr_fpg_size.attr,
+	&dev_attr_sec_size.attr,
+	&dev_attr_sec_per_pg.attr,
+
 	&dev_attr_media_type.attr,
 	&dev_attr_flash_media_type.attr,
 	&dev_attr_num_channels.attr,
@@ -139,6 +160,7 @@ static struct attribute *nvm_dev_attrs[] = {
 	&dev_attr_erase_max.attr,
 	&dev_attr_multiplane_modes.attr,
 	&dev_attr_media_capabilities.attr,
+	&dev_attr_max_phys_sect.attr,
 	&dev_attr_channel_parallelism.attr,
 	NULL,
 };

@@ -66,7 +66,7 @@ static int dflash_setup_rq(struct dflash *dflash, struct bio *bio,
 		rqd->ppa_list = nvm_dev_dma_alloc(dflash->dev, GFP_KERNEL,
 							&rqd->dma_ppa_list);
 		if (!rqd->ppa_list) {
-			pr_err("dflash: can not allocate ppa list\n");
+			pr_err("nvm-dflash: can not allocate ppa list\n");
 			return NVM_IO_ERR;
 		}
 
@@ -118,17 +118,17 @@ static int dflash_submit_io(struct dflash *dflash, struct bio *bio,
 
 		/* Expose flags to the application */
 		if (npages == 2) {
-			pr_info("DUAL!\n");
+			pr_info("nvm-dflash: DUAL!\n");
 			rqd->flags |= NVM_IO_DUAL_ACCESS;
 		} else if (npages > 2) {
-			pr_info("QUAD\n");
+			pr_info("nvm-dflash: QUAD\n");
 			rqd->flags |= NVM_IO_QUAD_ACCESS;
 		}
 	}
 
 	err = nvm_submit_io(dflash->dev, rqd);
 	if (err) {
-		pr_err("rrpc: IO submission failed: %d\n", err);
+		pr_err("nvm-dflash: IO submission failed: %d\n", err);
 		return NVM_IO_ERR;
 	}
 
@@ -147,7 +147,7 @@ static blk_qc_t dflash_make_rq(struct request_queue *q, struct bio *bio)
 
 	rqd = mempool_alloc(dflash->rq_pool, GFP_KERNEL);
 	if (!rqd) {
-		pr_err_ratelimited("dflash: not able to queue bio.");
+		pr_err_ratelimited("nvm-dflash: not able to queue bio.");
 		bio_io_error(bio);
 		return BLK_QC_T_NONE;
 	}
@@ -312,13 +312,13 @@ static void *dflash_init(struct nvm_dev *dev, struct gendisk *tdisk,
 
 	ret = dflash_luns_init(dflash, lun_begin, lun_end);
 	if (ret) {
-		pr_err("nvm: dflash: could not initialize luns\n");
+		pr_err("nvm-dflash: could not initialize luns\n");
 		goto clean;
 	}
 
 	ret = dflash_core_init(dflash);
 	if (ret) {
-		pr_err("nvm: dflash: could not initialize core\n");
+		pr_err("nvm-dflash: could not initialize core\n");
 		goto clean;
 	}
 
@@ -329,10 +329,10 @@ static void *dflash_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	blk_queue_logical_block_size(tqueue, queue_physical_block_size(bqueue));
 	blk_queue_max_hw_sectors(tqueue, queue_max_hw_sectors(bqueue));
 
-	pr_info("nvm: dflash initialized dflash %lu luns, %lu blocks and %lu pages\n",
-				dflash->nr_luns,
-				dflash->nr_luns * dev->blks_per_lun,
-				dflash->nr_luns * dev->sec_per_lun);
+	pr_info("nvm-dflash: initialized nr_luns(%lu), blocks(%lu), pages(%lu)\n",
+		dflash->nr_luns,
+		dflash->nr_luns * dev->blks_per_lun,
+		dflash->nr_luns * dev->sec_per_lun);
 
 	return dflash;
 clean:
