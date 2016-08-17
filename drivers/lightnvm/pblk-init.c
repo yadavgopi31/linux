@@ -36,9 +36,6 @@ static int pblk_submit_io_checks(struct pblk *pblk, struct bio *bio)
 	if ((bio_size < pblk->dev->sec_size) && (!is_flush))
 		return 1;
 
-	if (bio_size > pblk->dev->max_rq_size)
-		return 1;
-
 	return 0;
 }
 
