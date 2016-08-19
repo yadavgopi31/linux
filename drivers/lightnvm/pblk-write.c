@@ -364,6 +364,8 @@ int pblk_submit_write(struct pblk *pblk)
 		goto fail_free_bio;
 	}
 
+	down(&pblk->wr_sem);
+
 	err = nvm_submit_io(dev, rqd);
 	if (err) {
 		pr_err("pblk: I/O submission failed: %d\n", err);
@@ -393,6 +395,8 @@ fail_rqd:
 int pblk_write_ts(void *data)
 {
 	struct pblk *pblk = data;
+
+	sema_init(&pblk->wr_sem, 1);
 
 	while (!kthread_should_stop()) {
 		if (!pblk_submit_write(pblk))
@@ -614,6 +618,8 @@ void pblk_end_io_write(struct pblk *pblk, struct nvm_rq *rqd)
 {
 	struct nvm_dev *dev = pblk->dev;
 	struct pblk_ctx *ctx;
+
+	up(&pblk->wr_sem);
 
 	if (rqd->error == NVM_RSP_ERR_FAILWRITE) {
 		nvm_addr_to_generic_mode(dev, rqd);

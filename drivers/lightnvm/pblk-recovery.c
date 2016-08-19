@@ -184,6 +184,8 @@ void pblk_submit_rec(struct work_struct *work)
 	atomic_add(nr_rec_secs, &pblk->recov_writes);
 #endif
 
+	down(&pblk->wr_sem);
+
 	err = nvm_submit_io(dev, rqd);
 	if (err) {
 		pr_err("pblk: I/O submission failed: %d\n", err);

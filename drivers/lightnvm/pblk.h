@@ -439,6 +439,8 @@ struct pblk {
 
 	struct pblk_blk_pool blk_pool;
 	struct pblk_gc_thresholds gc_ths;
+
+	struct semaphore wr_sem;
 };
 
 struct pblk_block_ws {
