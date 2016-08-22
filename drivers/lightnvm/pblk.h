@@ -634,6 +634,18 @@ void pblk_gc_kick(struct pblk *pblk);
 
 void pblk_print_failed_rqd(struct pblk *pblk, struct nvm_rq *rqd, int error);
 
+static inline void print_ppa(struct ppa_addr *p, char *msg, int error)
+{
+	if (p->c.is_cached) {
+		pr_err("ppa: (%s: %x) cache line: %llu\n",
+				msg, error, (u64)p->c.line);
+	} else {
+		pr_err("ppa: (%s: %x) %llx: ch:%d,pl:%d,lun:%d,blk:%d,pg:%d,sec:%d\n",
+			msg, error, p->ppa,
+			p->g.ch, p->g.pl, p->g.lun, p->g.blk, p->g.pg, p->g.sec);
+	}
+}
+
 static inline int nvm_addr_in_cache(struct ppa_addr gp)
 {
 	if (gp.ppa != ADDR_EMPTY && gp.c.is_cached)

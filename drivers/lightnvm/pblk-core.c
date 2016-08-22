@@ -58,13 +58,6 @@ void pblk_free_rqd(struct pblk *pblk, struct nvm_rq *rqd, int rw)
 	mempool_free(rqd, pool);
 }
 
-static inline void print_ppa(struct ppa_addr *p, char *msg, int error)
-{
-	pr_err("ppa: (%s: %x) %llx: ch:%d,pl:%d,lun:%d,blk:%d,pg:%d,sec:%d\n",
-		msg, error, p->ppa,
-		p->g.ch, p->g.pl, p->g.lun, p->g.blk, p->g.pg, p->g.sec);
-}
-
 void pblk_print_failed_rqd(struct pblk *pblk, struct nvm_rq *rqd, int error)
 {
 	int offset = -1;
