@@ -314,6 +314,7 @@ static void pblk_luns_free(struct pblk *pblk)
 	}
 
 	kfree(pblk->luns);
+	kfree(pblk->ch_list);
 }
 
 static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
@@ -344,6 +345,14 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 	if (!pblk->luns)
 		return -ENOMEM;
 
+	pblk->ch_list = kcalloc(dev->nr_chnls, sizeof(struct pblk_ch),
+								GFP_KERNEL);
+	if (!pblk->ch_list)
+		return -ENOMEM;
+
+	for (i = 0; i < dev->nr_chnls; i++)
+		sema_init(&pblk->ch_list[i].ch_sem, PBLK_MAX_CH_INFLIGHT_IOS);
+
 	/* 1:1 mapping */
 	for (i = 0; i < pblk->nr_luns; i++) {
 		/* Align lun list to the channel each lun belongs to */
@@ -370,6 +379,8 @@ static int pblk_luns_init(struct pblk *pblk, int lun_begin, int lun_end)
 			ret = -ENOMEM;
 			goto err;
 		}
+
+		rlun->ch = ch;
 
 		for (j = 0; j < pblk->dev->blks_per_lun; j++) {
 			struct pblk_block *rblk = &rlun->blocks[j];

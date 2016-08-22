@@ -623,6 +623,8 @@ void pblk_end_close_blk_bio(struct pblk *pblk, struct nvm_rq *rqd, int run_gc)
 	struct pblk_ctx *ctx = pblk_set_ctx(pblk, rqd);
 	struct pblk_compl_close_ctx *c_ctx = ctx->c_ctx;
 
+	up(&pblk->ch_list[c_ctx->rblk->rlun->ch].ch_sem);
+
 	if (run_gc)
 		pblk_run_blk_ws(pblk, c_ctx->rblk, pblk_gc_queue);
 
@@ -768,6 +770,9 @@ static int pblk_setup_pad_rq(struct pblk *pblk, struct pblk_block *rblk,
 #endif
 
 out:
+	/* A page mapping counts as one inflight I/O */
+	down(&pblk->ch_list[rblk->rlun->ch].ch_sem);
+
 	return ret;
 }
 

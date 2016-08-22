@@ -37,6 +37,7 @@
 #define PBLK_SECTOR (512)
 #define PBLK_EXPOSED_PAGE_SIZE (4096)
 #define PBLK_MAX_REQ_ADDRS (64)
+#define PBLK_MAX_CH_INFLIGHT_IOS (4)
 
 #define NR_PHY_IN_LOG (PBLK_EXPOSED_PAGE_SIZE / PBLK_SECTOR)
 
@@ -259,6 +260,8 @@ struct pblk_lun {
 	struct pblk_block *cur;
 	struct pblk_block *blocks;	/* Reference to block allocation */
 
+	unsigned int ch;
+
 	struct list_head prio_list;	/* Blocks that may be GC'ed */
 	struct list_head open_list;	/* In-use open blocks. These are blocks
 					 * that can be both written to and read
@@ -334,6 +337,10 @@ struct pblk_w_luns {
 };
 
 #define NVM_MEM_PAGE_WRITE (8)
+
+struct pblk_ch {
+	struct semaphore ch_sem;
+};
 
 struct pblk {
 	/* instance must be kept in top to resolve pblk in unprep */
@@ -440,7 +447,7 @@ struct pblk {
 	struct pblk_blk_pool blk_pool;
 	struct pblk_gc_thresholds gc_ths;
 
-	struct semaphore wr_sem;
+	struct pblk_ch *ch_list;
 };
 
 struct pblk_block_ws {
