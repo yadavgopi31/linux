@@ -369,6 +369,8 @@ static int dflash_ioctl_user_io(struct dflash *df,
 
 	ret = dflash_submit_io(df, rqd, &io);
 
+	copy_to_user(uio, &io, sizeof(io));
+
 	mempool_free(rqd, df->rq_pool);
 	return ret;
 }
