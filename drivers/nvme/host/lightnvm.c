@@ -572,7 +572,6 @@ static int nvme_nvm_submit_user_io(struct nvm_dev *dev, struct nvm_rq *rqd,
 
 	nvme_nvm_rqtocmd(rq, rqd, ns, cmd);
 
-	rqd->wait = &wait;
 	rq->cmd = (unsigned char *)cmd;
 	rq->cmd_len = sizeof(struct nvme_nvm_command);
 	rq->special = cmd + 1;
@@ -593,7 +592,7 @@ static int nvme_nvm_submit_user_io(struct nvm_dev *dev, struct nvm_rq *rqd,
 	if (cqe)
 		rqd->ppa_status = le64_to_cpu(cqe->result);
 
-	nvm_end_io(rqd, rq->errors);
+	rqd->error = rq->errors;
 
 	kfree(rq->cmd);
 	blk_mq_free_request(rq);

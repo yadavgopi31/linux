@@ -67,17 +67,17 @@ out_free_ppa_list:
 	return ret;
 }
 
-static int dflash_submit_io(struct dflash *dflash, struct nvm_rq *rqd,
+static int dflash_submit_io(struct dflash *df, struct nvm_rq *rqd,
 						struct nvm_ioctl_io *io)
 {
-	struct nvm_dev *dev = dflash->dev;
+	struct nvm_dev *dev = df->dev;
 	int ret;
 
-	ret = dflash_setup_rq(dflash, rqd, io);
+	ret = dflash_setup_rq(df, rqd, io);
 	if (ret)
 		return ret;
 
-	rqd->ins = &dflash->instance;
+	rqd->ins = &df->instance;
 	rqd->nr_ppas = io->nppas;
 	rqd->flags |= io->flags;
 
@@ -88,25 +88,37 @@ static int dflash_submit_io(struct dflash *dflash, struct nvm_rq *rqd,
 		rqd->flags |= NVM_IO_SUSPEND;
 	}
 
-	io->result = dev->ops->submit_user_io(dflash->dev, rqd,
+	io->result = dev->ops->submit_user_io(df->dev, rqd,
 						(void *)io->addr, io->data_len);
 	io->status = rqd->ppa_status;
 
-	return 0;
+	if (rqd->nr_ppas > 1)
+		nvm_dev_dma_free(df->dev, rqd->ppa_list, rqd->dma_ppa_list);
+
+	return rqd->error;
 }
 
 static void dflash_end_io(struct nvm_rq *rqd)
 {
-	struct dflash *dflash = container_of(rqd->ins, struct dflash, instance);
-	uint8_t npages = rqd->nr_ppas;
-
-	bio_put(rqd->bio);
-
-	if (npages > 1)
-		nvm_dev_dma_free(dflash->dev, rqd->ppa_list, rqd->dma_ppa_list);
-
-	mempool_free(rqd, dflash->rq_pool);
 }
+
+static int dflash_ioctl_user_io(struct dflash *df,
+						struct nvm_ioctl_io __user *uio)
+{
+	struct nvm_ioctl_io io;
+	struct nvm_rq rqd;
+	int ret;
+
+	if (copy_from_user(&io, uio, sizeof(io)))
+		return -EFAULT;
+
+	ret = dflash_submit_io(df, &rqd, &io);
+
+	copy_to_user(uio, &io, sizeof(io));
+
+	return ret;
+}
+
 
 static sector_t dflash_capacity(void *private)
 {
@@ -352,42 +364,18 @@ static int dflash_ioctl_put_block(struct dflash *dflash, void __user *arg)
 	return 0;
 }
 
-static int dflash_ioctl_user_io(struct dflash *df,
-						struct nvm_ioctl_io __user *uio)
-{
-	struct nvm_ioctl_io io;
-	struct nvm_rq *rqd;
-	int ret;
-
-	if (copy_from_user(&io, uio, sizeof(io)));
-		return -EFAULT;
-
-	rqd = mempool_alloc(df->rq_pool, GFP_KERNEL);
-	if (!rqd)
-		return -ENOMEM;
-	memset(rqd, 0, sizeof(struct nvm_rq));
-
-	ret = dflash_submit_io(df, rqd, &io);
-
-	copy_to_user(uio, &io, sizeof(io));
-
-	mempool_free(rqd, df->rq_pool);
-	return ret;
-}
-
 static int dflash_ioctl(struct block_device *bdev, fmode_t mode,
 					unsigned int cmd, unsigned long arg)
 {
 	struct dflash *dflash = bdev->bd_disk->private_data;
-	void __user *argp = (void __user *)arg;
 
 	switch (cmd) {
-	case NVM_PIO:
-		return dflash_ioctl_user_io(dflash, (void __user *)argp);
+	case 12345 /*NVM_PIO*/:
+		return dflash_ioctl_user_io(dflash, (void __user *)arg);
 	case NVM_BLOCK_GET:
-		return dflash_ioctl_get_block(dflash, (void __user *)argp);
+		return dflash_ioctl_get_block(dflash, (void __user *)arg);
 	case NVM_BLOCK_PUT:
-		return dflash_ioctl_put_block(dflash, (void __user *)argp);
+		return dflash_ioctl_put_block(dflash, (void __user *)arg);
 	default:
 		return -ENOTTY;
 	}

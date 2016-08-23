@@ -66,6 +66,7 @@ struct nvm_ioctl_io
 	__u32 data_len;
 	__u64 status;
 	__u32 result;
+	__u32 rsvd3[3];
 };
 
 /* TODO Make commands reserved in the global lightnvm ioctl opcode pool */
