@@ -25,149 +25,74 @@ static struct kmem_cache *dflash_rq_cache;
 static DECLARE_RWSEM(dflash_lock);
 extern const struct block_device_operations dflash_fops;
 
-static int dflash_setup_rq(struct dflash *dflash, struct bio *bio,
-					struct nvm_rq *rqd, uint8_t npages)
+static int dflash_setup_rq(struct dflash *dflash, struct nvm_rq *rqd,
+						struct nvm_ioctl_io *io)
 {
 	struct nvm_dev *dev = dflash->dev;
-	struct ppa_addr ppa;
-	sector_t laddr = dflash_get_laddr(bio);
-	sector_t ltmp = laddr;
-	struct dflash_lun *nlun;
-	int i;
+	struct ppa_addr ppas[64];
+	int i, nppas, ret = 0;
 
-	nlun = &dflash->luns[laddr / dev->sec_per_lun];
-	ppa.ppa = 0;
-	ppa.g.lun = nlun->parent->lun_id;
-	ppa.g.ch = nlun->parent->chnl_id;
-	ppa.g.blk = (laddr / dev->sec_per_blk) % dev->blks_per_lun;
-	ppa.g.sec = laddr % dev->sec_per_pg;
-	ppa.g.pl = (laddr % dev->sec_per_pl) / dev->nr_planes;
-	ppa.g.pg = (laddr % dev->sec_per_blk) / (dev->sec_per_pl);
+	nppas = io->nppas;
 
-	/* pr_info("device charac - sec_per_blk:%d,blks_per_lun:%d, " */
-	/*	"sec_per_pl:%d, sec_per_pg:%d,nr_planes:%d\n", */
-	/*	dev->sec_per_blk, dev->blks_per_lun, */
-	/*	dev->sec_per_pl, dev->sec_per_pg, dev->nr_planes); */
-
-	/* the first block of a lun is used internally. */
-	/* also block the last block access on partition scans. */
-	if (ppa.g.blk == 0 || (ppa.g.ch == 15 && ppa.g.blk == 1023))
-		return NVM_IO_DONE;
-	/* if (npages == 1) { */
-	/* 	pr_info("addr: %llu[%u]: ch: %u sec: %u pl: %u lun: %u pg: %u blk: %u -> %llu 0x%x\n", */
-	/* 			(unsigned long long) ltmp, npages, */
-	/* 			ppa.g.ch,ppa.g.sec, */
-	/* 			ppa.g.pl,ppa.g.lun, */
-	/* 			ppa.g.pg,ppa.g.blk, */
-	/* 			ppa.ppa,ppa.ppa); */
-	/* } */
-
-	if (npages > 1) {
-		rqd->ppa_list = nvm_dev_dma_alloc(dflash->dev, GFP_KERNEL,
-							&rqd->dma_ppa_list);
-		if (!rqd->ppa_list) {
-			pr_err("nvm-dflash: can not allocate ppa list\n");
-			return NVM_IO_ERR;
-		}
-
-		for (i = 0; i < npages; i++) {
-			BUG_ON(!(laddr + i >= 0 && laddr + i < dflash->nr_pages));
-			rqd->ppa_list[i] = ppa;
-			/* pr_info("addr: %llu[%u]: ch: %u sec: %u pl: %u lun: %u pg: %u blk: %u -> %llu 0x%x\n",
-			 *		(unsigned long long) ltmp, npages,
-			 *		ppa.g.ch,ppa.g.sec,
-			 *		ppa.g.pl,ppa.g.lun,
-			 *		ppa.g.pg,ppa.g.blk,
-			 *		ppa.ppa,ppa.ppa);
-			 */
-			ltmp++;
-			ppa.g.sec = ltmp % dev->sec_per_pg;
-			ppa.g.pl = (ltmp % dev->sec_per_pl) / dev->nr_planes;
-			ppa.g.pg = (ltmp % dev->sec_per_blk) / dev->sec_per_pl;
-		}
-
-		return NVM_IO_OK;
+	if (nppas == 1) {
+		struct ppa_addr ppa;
+		ppa.ppa = io->ppas;
+		rqd->ppa_addr = generic_to_dev_addr(dev, ppa);
+		return 0;
 	}
 
-	rqd->ppa_addr = ppa;
+	rqd->ppa_list = nvm_dev_dma_alloc(dev, GFP_KERNEL,
+							&rqd->dma_ppa_list);
+	if (!rqd->ppa_list)
+		return NVM_IO_ERR;
 
-	return NVM_IO_OK;
+	if (copy_from_user(ppas, (void __user *)io->ppas, sizeof(u64) * io->nppas)) {
+		ret = -EFAULT;
+		goto out_free_ppa_list;
+	}
+
+	for (i = 0; i < nppas; i++) {
+		rqd->ppa_list[i] = generic_to_dev_addr(dev, ppas[i]);
+		pr_info("addr: %i ch: %u sec: %u pl: %u lun: %u pg: %u blk: %u -> dev 0x%llx\n",
+				i,
+				ppas[i].g.ch,ppas[i].g.sec,
+				ppas[i].g.pl,ppas[i].g.lun,
+				ppas[i].g.pg,ppas[i].g.blk,
+				rqd->ppa_list[i].ppa);
+	}
+
+	return 0;
+out_free_ppa_list:
+	nvm_dev_dma_free(dev, rqd->ppa_list, rqd->dma_ppa_list);
+	return ret;
 }
 
-static int dflash_submit_io(struct dflash *dflash, struct bio *bio,
-							struct nvm_rq *rqd)
+static int dflash_submit_io(struct dflash *dflash, struct nvm_rq *rqd,
+						struct nvm_ioctl_io *io)
 {
-	int err;
-	uint8_t npages = dflash_get_pages(bio);
+	struct nvm_dev *dev = dflash->dev;
+	int ret;
 
-	err = dflash_setup_rq(dflash, bio, rqd, npages);
-	if (err)
-		return err;
+	ret = dflash_setup_rq(dflash, rqd, io);
+	if (ret)
+		return ret;
 
-	bio_get(bio);
-	rqd->bio = bio;
 	rqd->ins = &dflash->instance;
-	rqd->nr_ppas = npages;
+	rqd->nr_ppas = io->nppas;
+	rqd->flags |= io->flags;
 
-	if (bio_data_dir(bio) == WRITE) {
+	if (io->opcode & 1) {
 		rqd->opcode = NVM_OP_PWRITE;
-		rqd->flags |= NVM_IO_QUAD_ACCESS;
 	} else {
 		rqd->opcode = NVM_OP_PREAD;
 		rqd->flags |= NVM_IO_SUSPEND;
-
-		/* Expose flags to the application */
-		if (npages == 2) {
-			pr_info("nvm-dflash: DUAL!\n");
-			rqd->flags |= NVM_IO_DUAL_ACCESS;
-		} else if (npages > 2) {
-			pr_info("nvm-dflash: QUAD\n");
-			rqd->flags |= NVM_IO_QUAD_ACCESS;
-		}
 	}
 
-	err = nvm_submit_io(dflash->dev, rqd);
-	if (err) {
-		pr_err("nvm-dflash: IO submission failed: %d\n", err);
-		return NVM_IO_ERR;
-	}
+	io->result = dev->ops->submit_user_io(dflash->dev, rqd,
+						(void *)io->addr, io->data_len);
+	io->status = rqd->ppa_status;
 
-	return NVM_IO_OK;
-}
-
-static blk_qc_t dflash_make_rq(struct request_queue *q, struct bio *bio)
-{
-	struct dflash *dflash;
-	struct nvm_rq *rqd;
-
-	if (bio->bi_rw & REQ_OP_DISCARD)
-		return BLK_QC_T_NONE;
-
-	dflash = q->queuedata;
-
-	rqd = mempool_alloc(dflash->rq_pool, GFP_KERNEL);
-	if (!rqd) {
-		pr_err_ratelimited("nvm-dflash: not able to queue bio.");
-		bio_io_error(bio);
-		return BLK_QC_T_NONE;
-	}
-	memset(rqd, 0, sizeof(struct nvm_rq));
-
-	switch (dflash_submit_io(dflash, bio, rqd)) {
-	case NVM_IO_OK:
-		return BLK_QC_T_NONE;
-	case NVM_IO_DONE:
-		bio_endio(bio);
-		break;
-	case NVM_IO_ERR:
-		bio_io_error(bio);
-		break;
-	default:
-		break;
-	}
-
-	mempool_free(rqd, dflash->rq_pool);
-	return BLK_QC_T_NONE;
+	return 0;
 }
 
 static void dflash_end_io(struct nvm_rq *rqd)
@@ -427,6 +352,27 @@ static int dflash_ioctl_put_block(struct dflash *dflash, void __user *arg)
 	return 0;
 }
 
+static int dflash_ioctl_user_io(struct dflash *df,
+						struct nvm_ioctl_io __user *uio)
+{
+	struct nvm_ioctl_io io;
+	struct nvm_rq *rqd;
+	int ret;
+
+	if (copy_from_user(&io, uio, sizeof(io)));
+		return -EFAULT;
+
+	rqd = mempool_alloc(df->rq_pool, GFP_KERNEL);
+	if (!rqd)
+		return -ENOMEM;
+	memset(rqd, 0, sizeof(struct nvm_rq));
+
+	ret = dflash_submit_io(df, rqd, &io);
+
+	mempool_free(rqd, df->rq_pool);
+	return ret;
+}
+
 static int dflash_ioctl(struct block_device *bdev, fmode_t mode,
 					unsigned int cmd, unsigned long arg)
 {
@@ -434,10 +380,12 @@ static int dflash_ioctl(struct block_device *bdev, fmode_t mode,
 	void __user *argp = (void __user *)arg;
 
 	switch (cmd) {
+	case NVM_PIO:
+		return dflash_ioctl_user_io(dflash, (void __user *)argp);
 	case NVM_BLOCK_GET:
-		return dflash_ioctl_get_block(dflash, argp);
+		return dflash_ioctl_get_block(dflash, (void __user *)argp);
 	case NVM_BLOCK_PUT:
-		return dflash_ioctl_put_block(dflash, argp);
+		return dflash_ioctl_put_block(dflash, (void __user *)argp);
 	default:
 		return -ENOTTY;
 	}
@@ -473,11 +421,17 @@ const struct block_device_operations dflash_fops = {
 	.open		= dflash_open,
 	.release	= dflash_release,
 };
+static blk_qc_t dflash_make_rq(struct request_queue *q, struct bio *bio)
+{
+	bio_endio(bio);
+	return BLK_QC_T_NONE;
+}
 
 static struct nvm_tgt_type tt_dflash = {
 	.name		= "dflash",
 	.version	= {0, 0, 1},
 
+	/* TODO: make it a char dev instead */
 	.make_rq	= dflash_make_rq,
 	.capacity	= dflash_capacity,
 	.end_io		= dflash_end_io,
