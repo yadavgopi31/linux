@@ -55,6 +55,8 @@ typedef int (nvm_get_l2p_tbl_fn)(struct nvm_dev *, u64, u32,
 typedef int (nvm_op_bb_tbl_fn)(struct nvm_dev *, struct ppa_addr, u8 *);
 typedef int (nvm_op_set_bb_fn)(struct nvm_dev *, struct ppa_addr *, int, int);
 typedef int (nvm_submit_io_fn)(struct nvm_dev *, struct nvm_rq *);
+typedef int (nvm_submit_user_io_fn)(struct nvm_dev *, struct nvm_rq *,
+				void __user *data, unsigned data_len);
 typedef int (nvm_erase_blk_fn)(struct nvm_dev *, struct nvm_rq *);
 typedef void *(nvm_create_dma_pool_fn)(struct nvm_dev *, char *);
 typedef void (nvm_destroy_dma_pool_fn)(void *);
@@ -69,6 +71,7 @@ struct nvm_dev_ops {
 	nvm_op_set_bb_fn	*set_bb_tbl;
 
 	nvm_submit_io_fn	*submit_io;
+	nvm_submit_user_io_fn	*submit_user_io;
 	nvm_erase_blk_fn	*erase_block;
 
 	nvm_create_dma_pool_fn	*create_dma_pool;
@@ -78,8 +81,6 @@ struct nvm_dev_ops {
 
 	unsigned int		max_phys_sect;
 };
-
-
 
 #ifdef CONFIG_NVM
 
