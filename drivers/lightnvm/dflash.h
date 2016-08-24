@@ -44,13 +44,9 @@ enum {
 };
 
 struct nvm_ioctl_vblock {
-	__u64 id;
-	__u64 bppa;
-	__u32 vlun_id;
-	__u32 owner_id;
-	__u32 nppas;
-	__u16 ppa_bitmap;
+	__u64 ppa;
 	__u16 flags;
+	__u16 rsvd[3];
 };
 
 struct nvm_ioctl_io
@@ -86,24 +82,11 @@ enum {
 #define NVM_PIO			_IOWR(NVM_IOCTL, NVM_PIO_CMD, \
 						struct nvm_ioctl_io)
 
-struct dflash_lun;
-
 struct dflash {
 	struct nvm_tgt_instance instance;
-	unsigned long nr_pages;
-	unsigned long nr_luns;
-	struct dflash_lun *luns;
 	mempool_t *rq_pool;
 	struct nvm_dev *dev;
 	struct gendisk *disk;
-};
-
-struct dflash_lun {
-	struct dflash *dflash;
-	struct nvm_lun *parent;
-	struct nvm_block *blocks;
-	unsigned long nr_blocks;
-	unsigned long nr_free_blocks;
 };
 
 static inline unsigned int dflash_get_pages(struct bio *bio)
