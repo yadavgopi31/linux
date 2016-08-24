@@ -529,6 +529,7 @@ int pblk_map_page(struct pblk *pblk, struct pblk_block *rblk,
 struct nvm_rq *pblk_alloc_rqd(struct pblk *pblk, int rw);
 void pblk_free_rqd(struct pblk *pblk, struct nvm_rq *rqd, int rw);
 void pblk_flush_writer(struct pblk *pblk);
+struct ppa_addr pblk_get_lba_map(struct pblk *pblk, sector_t lba);
 void pblk_discard(struct pblk *pblk, struct bio *bio);
 struct pblk_blk_rec_lpg *pblk_alloc_blk_meta(struct pblk *pblk,
 					     struct pblk_block *rblk,

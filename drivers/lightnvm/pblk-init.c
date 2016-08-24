@@ -713,6 +713,47 @@ static ssize_t pblk_sysfs_block_pool(struct pblk *pblk, char *buf)
 {
 	return pblk_blk_pool_sysfs(pblk, buf);
 }
+
+static ssize_t pblk_sysfs_l2p_map_print(struct pblk *pblk, const char *buf,
+					ssize_t len)
+{
+	size_t c_len;
+	sector_t lba;
+	struct ppa_addr ppa;
+
+
+	c_len = strcspn(buf, "\n");
+	if (c_len >= len)
+		return -EINVAL;
+
+	sscanf(buf, "%lu", &lba);
+	ppa = pblk_get_lba_map(pblk, lba);
+
+	if (ppa_empty(ppa)) {
+		pr_info("pblk: lba:%lu - ppa: EMPTY ADDRESS\n", lba);
+	} else {
+		if (ppa.c.is_cached) {
+			pr_info("pblk: lba:%lu - ppa: cacheline:%llu\n",
+				lba,
+				(u64)ppa.c.line);
+
+			goto out;
+		}
+
+		pr_info("pblk: lba:%lu - ppa: %llx: ch:%d,lun:%d,blk:%d,pg:%d,pl:%d,sec:%d\n",
+				lba,
+				ppa.ppa,
+				ppa.g.ch,
+				ppa.g.lun,
+				ppa.g.blk,
+				ppa.g.pg,
+				ppa.g.pl,
+				ppa.g.sec);
+	}
+
+out:
+	return len;
+}
 #endif
 
 static struct attribute sys_write_max_attr = {
@@ -755,6 +796,11 @@ static struct attribute sys_blk_pool_attr = {
 	.name = "block_pool",
 	.mode = S_IRUGO,
 };
+
+static struct attribute sys_l2p_map_attr = {
+	.name = "l2p_map",
+	.mode = S_IRUGO | S_IWUSR,
+};
 #endif
 
 static struct attribute *pblk_attrs[] = {
@@ -767,6 +813,7 @@ static struct attribute *pblk_attrs[] = {
 	&sys_bad_blocks_attr,
 	&sys_rb_attr,
 	&sys_blk_pool_attr,
+	&sys_l2p_map_attr,
 #endif
 	NULL,
 };
@@ -804,6 +851,12 @@ static ssize_t pblk_sysfs_show(struct nvm_target *t, struct attribute *attr,
 static ssize_t pblk_sysfs_store(struct nvm_target *t, struct attribute *attr,
 			        const char *buf, size_t len)
 {
+#ifdef CONFIG_NVM_DEBUG
+	struct pblk *pblk = t->disk->private_data;
+
+	if (strcmp(attr->name, "l2p_map") == 0)
+		return pblk_sysfs_l2p_map_print(pblk, buf, len);
+#endif
 	return 0;
 }
 

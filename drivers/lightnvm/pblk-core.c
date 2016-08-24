@@ -484,6 +484,19 @@ void pblk_discard(struct pblk *pblk, struct bio *bio)
 	pblk_invalidate_range(pblk, slba, nr_secs);
 }
 
+struct ppa_addr pblk_get_lba_map(struct pblk *pblk, sector_t lba)
+{
+	struct pblk_addr *gp;
+	struct ppa_addr ppa;
+
+	spin_lock(&pblk->trans_lock);
+	gp = &pblk->trans_map[lba];
+	ppa = gp->ppa;
+	spin_unlock(&pblk->trans_lock);
+
+	return ppa;
+}
+
 /* Put block back to media manager but do not free rblk structures */
 void pblk_retire_blk(struct pblk *pblk, struct pblk_block *rblk)
 {
