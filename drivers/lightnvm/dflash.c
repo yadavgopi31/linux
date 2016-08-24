@@ -21,8 +21,6 @@
 
 #include "dflash.h"
 
-static struct kmem_cache *dflash_rq_cache;
-static DECLARE_RWSEM(dflash_lock);
 extern const struct block_device_operations dflash_fops;
 
 static int dflash_setup_rq(struct dflash *dflash, struct nvm_rq *rqd,
@@ -53,12 +51,12 @@ static int dflash_setup_rq(struct dflash *dflash, struct nvm_rq *rqd,
 
 	for (i = 0; i < nppas; i++) {
 		rqd->ppa_list[i] = generic_to_dev_addr(dev, ppas[i]);
-/*		pr_info("addr: %i ch: %u sec: %u pl: %u lun: %u pg: %u blk: %u -> dev 0x%llx\n",
+		pr_info("addr: %i ch: %u sec: %u pl: %u lun: %u pg: %u blk: %u -> dev 0x%llx\n",
 				i,
 				ppas[i].g.ch,ppas[i].g.sec,
 				ppas[i].g.pl,ppas[i].g.lun,
 				ppas[i].g.pg,ppas[i].g.blk,
-				rqd->ppa_list[i].ppa);*/
+				rqd->ppa_list[i].ppa);
 	}
 
 	return 0;
@@ -79,10 +77,11 @@ static int dflash_submit_io(struct dflash *df, struct nvm_rq *rqd,
 
 	rqd->ins = &df->instance;
 	rqd->nr_ppas = io->nppas;
-	rqd->flags |= io->flags;
+	rqd->flags = 0;
 
 	if (io->opcode & 1) {
 		rqd->opcode = NVM_OP_PWRITE;
+		rqd->flags |= NVM_IO_QUAD_ACCESS;
 	} else {
 		rqd->opcode = NVM_OP_PREAD;
 		rqd->flags |= NVM_IO_SUSPEND;
@@ -121,41 +120,6 @@ static int dflash_ioctl_user_io(struct dflash *df,
 
 static sector_t dflash_capacity(void *private)
 {
-	struct dflash *df = private;
-	struct nvm_dev *dev = df->dev;
-
-	return dev->total_secs* NR_PHY_IN_LOG;
-}
-
-static void dflash_core_free(struct dflash *dflash)
-{
-	mempool_destroy(dflash->rq_pool);
-}
-
-static void dflash_free(struct dflash *dflash)
-{
-	if (!dflash)
-		return;
-
-	dflash_core_free(dflash);
-	kfree(dflash);
-}
-
-static int dflash_core_init(struct dflash *dflash)
-{
-	down_write(&dflash_lock);
-	dflash_rq_cache = kmem_cache_create("dflash_rq", sizeof(struct nvm_rq),
-							0, 0, NULL);
-	if (!dflash_rq_cache) {
-		up_write(&dflash_lock);
-		return -ENOMEM;
-	}
-	up_write(&dflash_lock);
-
-	dflash->rq_pool = mempool_create_slab_pool(64, dflash_rq_cache);
-	if (!dflash->rq_pool)
-		return -ENOMEM;
-
 	return 0;
 }
 
@@ -179,12 +143,6 @@ static void *dflash_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	dflash->dev = dev;
 	dflash->disk = tdisk;
 
-	ret = dflash_core_init(dflash);
-	if (ret) {
-		pr_err("nvm-dflash: could not initialize core\n");
-		goto clean;
-	}
-
 	tdisk->fops = &dflash_fops;
 	tdisk->flags |= GENHD_FL_SUPPRESS_PARTITION_INFO|GENHD_FL_NO_PART_SCAN;
 
@@ -195,8 +153,6 @@ static void *dflash_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	pr_info("nvm-dflash: initialized\n");
 
 	return dflash;
-clean:
-	dflash_free(dflash);
 err:
 	return ERR_PTR(ret);
 }
@@ -205,7 +161,7 @@ static void dflash_exit(void *private)
 {
 	struct dflash *dflash = private;
 
-	dflash_free(dflash);
+	kfree(dflash);
 }
 
 /*
