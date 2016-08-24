@@ -53,12 +53,12 @@ static int dflash_setup_rq(struct dflash *dflash, struct nvm_rq *rqd,
 
 	for (i = 0; i < nppas; i++) {
 		rqd->ppa_list[i] = generic_to_dev_addr(dev, ppas[i]);
-		pr_info("addr: %i ch: %u sec: %u pl: %u lun: %u pg: %u blk: %u -> dev 0x%llx\n",
+/*		pr_info("addr: %i ch: %u sec: %u pl: %u lun: %u pg: %u blk: %u -> dev 0x%llx\n",
 				i,
 				ppas[i].g.ch,ppas[i].g.sec,
 				ppas[i].g.pl,ppas[i].g.lun,
 				ppas[i].g.pg,ppas[i].g.blk,
-				rqd->ppa_list[i].ppa);
+				rqd->ppa_list[i].ppa);*/
 	}
 
 	return 0;
@@ -235,7 +235,6 @@ static int dflash_ioctl_get_block(struct dflash *df, void __user *arg)
 	if (!lun)
 		return -EINVAL;
 
-	printk("GET BLK %u %u %u\n", ppa.g.ch, ppa.g.lun, ppa.g.blk);
 	blk = nvm_get_blk(dev, lun, 0);
 	if (!blk)
 		return -EFAULT;
@@ -272,7 +271,6 @@ static int dflash_ioctl_put_block(struct dflash *df, void __user *arg)
 		return -EINVAL;
 
 	ppa.ppa = vblk.ppa;
-	printk("PUT BLK %u %u %u\n", ppa.g.ch, ppa.g.lun, ppa.g.blk);
 	block = &lun->blocks[ppa.g.blk];
 
 	nvm_put_blk(dev, block);
