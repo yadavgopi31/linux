@@ -548,6 +548,13 @@ void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd, uint8_t nr_secs)
 	struct bio *bio = rqd->bio;
 	struct bio *orig_bio = r_ctx->orig_bio;
 
+	if (bio->bi_error) {
+		inc_stat(pblk, &pblk->read_failed, 1);
+#ifdef CONFIG_NVM_DEBUG
+		pblk_print_failed_rqd(pblk, rqd, bio->bi_error);
+#endif
+	}
+
 	if (r_ctx->flags & PBLK_IOTYPE_SYNC)
 		return;
 
@@ -556,13 +563,6 @@ void pblk_end_io_read(struct pblk *pblk, struct nvm_rq *rqd, uint8_t nr_secs)
 
 	if (rqd->meta_list)
 		nvm_dev_dma_free(pblk->dev, rqd->meta_list, rqd->dma_meta_list);
-
-	if (bio->bi_error) {
-		inc_stat(pblk, &pblk->read_failed, 1);
-#ifdef CONFIG_NVM_DEBUG
-		pblk_print_failed_rqd(pblk, rqd, bio->bi_error);
-#endif
-	}
 
 	bio_put(bio);
 	if (orig_bio) {
