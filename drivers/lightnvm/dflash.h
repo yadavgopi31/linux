@@ -23,25 +23,10 @@
 #define DFLASH_H_
 
 #include <linux/blkdev.h>
-#include <linux/blk-mq.h>
-#include <linux/bio.h>
-#include <linux/blk_types.h>
 #include <linux/module.h>
-#include <linux/kthread.h>
-#include <linux/vmalloc.h>
 
 #include <linux/lightnvm.h>
 #include <uapi/linux/lightnvm.h>
-
-#define dflash_SECTOR (512)
-#define dflash_EXPOSED_PAGE_SIZE (4096)
-
-#define NR_PHY_IN_LOG (dflash_EXPOSED_PAGE_SIZE / dflash_SECTOR)
-
-enum {
-	NVM_PROV_SPEC_LUN = 1,
-	NVM_PROV_RAND_LUN = 2,
-};
 
 struct nvm_ioctl_vblock {
 	__u64 ppa;
@@ -88,20 +73,5 @@ struct dflash {
 	struct nvm_dev *dev;
 	struct gendisk *disk;
 };
-
-static inline unsigned int dflash_get_pages(struct bio *bio)
-{
-	return  bio->bi_iter.bi_size / dflash_EXPOSED_PAGE_SIZE;
-}
-
-static inline sector_t dflash_get_laddr(struct bio *bio)
-{
-	return bio->bi_iter.bi_sector / NR_PHY_IN_LOG;
-}
-
-static inline sector_t dflash_get_sector(sector_t laddr)
-{
-	return laddr * NR_PHY_IN_LOG;
-}
 
 #endif /* DFLASH_H_ */

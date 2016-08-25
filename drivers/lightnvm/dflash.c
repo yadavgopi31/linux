@@ -21,8 +21,6 @@
 
 #include "dflash.h"
 
-extern const struct block_device_operations dflash_fops;
-
 static int dflash_setup_rq(struct dflash *dflash, struct nvm_rq *rqd,
 						struct nvm_ioctl_io *io)
 {
@@ -34,13 +32,13 @@ static int dflash_setup_rq(struct dflash *dflash, struct nvm_rq *rqd,
 
 	if (nppas == 1) {
 		struct ppa_addr ppa;
+
 		ppa.ppa = io->ppas;
 		rqd->ppa_addr = generic_to_dev_addr(dev, ppa);
 		return 0;
 	}
 
-	rqd->ppa_list = nvm_dev_dma_alloc(dev, GFP_KERNEL,
-							&rqd->dma_ppa_list);
+	rqd->ppa_list = nvm_dev_dma_alloc(dev, GFP_KERNEL, &rqd->dma_ppa_list);
 	if (!rqd->ppa_list)
 		return NVM_IO_ERR;
 
@@ -51,12 +49,12 @@ static int dflash_setup_rq(struct dflash *dflash, struct nvm_rq *rqd,
 
 	for (i = 0; i < nppas; i++) {
 		rqd->ppa_list[i] = generic_to_dev_addr(dev, ppas[i]);
-		pr_info("addr: %i ch: %u sec: %u pl: %u lun: %u pg: %u blk: %u -> dev 0x%llx\n",
+	/*	pr_info("addr: %i ch: %u sec: %u pl: %u lun: %u pg: %u blk: %u -> dev 0x%llx\n",
 				i,
 				ppas[i].g.ch,ppas[i].g.sec,
 				ppas[i].g.pl,ppas[i].g.lun,
 				ppas[i].g.pg,ppas[i].g.blk,
-				rqd->ppa_list[i].ppa);
+				rqd->ppa_list[i].ppa);*/
 	}
 
 	return 0;
@@ -65,109 +63,37 @@ out_free_ppa_list:
 	return ret;
 }
 
-static int dflash_submit_io(struct dflash *df, struct nvm_rq *rqd,
-						struct nvm_ioctl_io *io)
-{
-	struct nvm_dev *dev = df->dev;
-	int ret;
-
-	ret = dflash_setup_rq(df, rqd, io);
-	if (ret)
-		return ret;
-
-	rqd->ins = &df->instance;
-	rqd->nr_ppas = io->nppas;
-	rqd->flags = 0;
-
-	if (io->opcode & 1) {
-		rqd->opcode = NVM_OP_PWRITE;
-		rqd->flags |= NVM_IO_QUAD_ACCESS;
-	} else {
-		rqd->opcode = NVM_OP_PREAD;
-		rqd->flags |= NVM_IO_SUSPEND;
-	}
-
-	io->result = dev->ops->submit_user_io(df->dev, rqd,
-						(void *)io->addr, io->data_len);
-	io->status = rqd->ppa_status;
-
-	if (rqd->nr_ppas > 1)
-		nvm_dev_dma_free(df->dev, rqd->ppa_list, rqd->dma_ppa_list);
-
-	return rqd->error;
-}
-
-static void dflash_end_io(struct nvm_rq *rqd)
-{
-}
-
 static int dflash_ioctl_user_io(struct dflash *df,
 						struct nvm_ioctl_io __user *uio)
 {
 	struct nvm_ioctl_io io;
+	struct nvm_dev *dev = df->dev;
 	struct nvm_rq rqd;
 	int ret;
 
 	if (copy_from_user(&io, uio, sizeof(io)))
 		return -EFAULT;
 
-	ret = dflash_submit_io(df, &rqd, &io);
+	memset(&rqd, 0, sizeof(struct nvm_rq));
+	ret = dflash_setup_rq(df, &rqd, &io);
+	if (ret)
+		return ret;
+
+	rqd.opcode = io.opcode;
+	rqd.nr_ppas = io.nppas;
+	rqd.flags = io.flags;
+
+	io.result = dev->ops->submit_user_io(dev, &rqd,
+						(void *)io.addr, io.data_len);
+	io.status = rqd.ppa_status;
+
+	if (rqd.nr_ppas > 1)
+		nvm_dev_dma_free(dev, rqd.ppa_list, rqd.dma_ppa_list);
 
 	copy_to_user(uio, &io, sizeof(io));
 
-	return ret;
-}
-
-static sector_t dflash_capacity(void *private)
-{
 	return 0;
 }
-
-static struct nvm_tgt_type tt_dflash;
-
-static void *dflash_init(struct nvm_dev *dev, struct gendisk *tdisk,
-						int lun_begin, int lun_end)
-{
-	struct request_queue *bqueue = dev->q;
-	struct request_queue *tqueue = tdisk->queue;
-	struct dflash *dflash;
-	int ret;
-
-	dflash = kzalloc(sizeof(struct dflash), GFP_KERNEL);
-	if (!dflash) {
-		ret = -ENOMEM;
-		goto err;
-	}
-
-	dflash->instance.tt = &tt_dflash;
-	dflash->dev = dev;
-	dflash->disk = tdisk;
-
-	tdisk->fops = &dflash_fops;
-	tdisk->flags |= GENHD_FL_SUPPRESS_PARTITION_INFO|GENHD_FL_NO_PART_SCAN;
-
-	/* inherit the size from the underlying device */
-	blk_queue_logical_block_size(tqueue, queue_physical_block_size(bqueue));
-	blk_queue_max_hw_sectors(tqueue, queue_max_hw_sectors(bqueue));
-
-	pr_info("nvm-dflash: initialized\n");
-
-	return dflash;
-err:
-	return ERR_PTR(ret);
-}
-
-static void dflash_exit(void *private)
-{
-	struct dflash *dflash = private;
-
-	kfree(dflash);
-}
-
-/*
- * TODO: move .ioctl to .unlocked_ioctl and implement locking within the module
- */
-static DEFINE_SPINLOCK(dev_list_lock);
 
 static int dflash_ioctl_get_block(struct dflash *df, void __user *arg)
 {
@@ -251,15 +177,20 @@ static int dflash_ioctl(struct block_device *bdev, fmode_t mode,
 	}
 }
 
+/*
+ * TODO: move .ioctl to .unlocked_ioctl and implement locking within the module
+ */
+static DEFINE_SPINLOCK(dev_list_lock);
+
 static int dflash_check_device(struct block_device *bdev)
 {
-	struct dflash *nb;
+	struct dflash *df;
 	int ret = 0;
 
 	/* TODO: kref?*/
 	spin_lock(&dev_list_lock);
-	nb = bdev->bd_disk->private_data;
-	if (!nb)
+	df = bdev->bd_disk->private_data;
+	if (!df)
 		ret = -ENXIO;
 	spin_unlock(&dev_list_lock);
 
@@ -281,10 +212,48 @@ const struct block_device_operations dflash_fops = {
 	.open		= dflash_open,
 	.release	= dflash_release,
 };
+
+static sector_t dflash_capacity(void *private)
+{
+	return 0;
+}
+
+static void dflash_end_io(struct nvm_rq *rqd)
+{
+}
+
 static blk_qc_t dflash_make_rq(struct request_queue *q, struct bio *bio)
 {
 	bio_endio(bio);
 	return BLK_QC_T_NONE;
+}
+
+static struct nvm_tgt_type tt_dflash;
+
+static void *dflash_init(struct nvm_dev *dev, struct gendisk *tdisk,
+						int lun_begin, int lun_end)
+{
+	struct dflash *df;
+
+	df = kzalloc(sizeof(struct dflash), GFP_KERNEL);
+	if (!df)
+		return ERR_PTR(-ENOMEM);
+
+	df->instance.tt = &tt_dflash;
+	df->dev = dev;
+	df->disk = tdisk;
+
+	tdisk->fops = &dflash_fops;
+	tdisk->flags |= GENHD_FL_SUPPRESS_PARTITION_INFO|GENHD_FL_NO_PART_SCAN;
+
+	pr_info("nvm-dflash: initialized\n");
+
+	return df;
+}
+
+static void dflash_exit(void *private)
+{
+	kfree(private);
 }
 
 static struct nvm_tgt_type tt_dflash = {
