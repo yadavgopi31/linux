@@ -137,8 +137,7 @@ static int pblk_submit_read_io(struct pblk *pblk, struct bio *bio,
 {
 	int err;
 
-	rqd->flags |= NVM_IO_SNGL_ACCESS;
-	rqd->flags |= NVM_IO_SUSPEND;
+	rqd->flags = NVM_IO_SNGL_ACCESS | NVM_IO_SUSPEND;
 
 	err = nvm_submit_io(pblk->dev, rqd);
 	if (err) {
