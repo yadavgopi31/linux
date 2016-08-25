@@ -170,10 +170,6 @@ try_cur:
 	}
 
 	spin_unlock(&rlun->lock);
-
-	/* A page mapping counts as one inflight I/O */
-	down(&pblk->ch_list[rblk->rlun->ch].ch_sem);
-
 	return ret;
 }
 

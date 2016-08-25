@@ -184,6 +184,8 @@ void pblk_submit_rec(struct work_struct *work)
 	atomic_add(nr_rec_secs, &pblk->recov_writes);
 #endif
 
+	down(&pblk->wr_sem);
+
 	err = nvm_submit_io(dev, rqd);
 	if (err) {
 		pr_err("pblk: I/O submission failed: %d\n", err);
@@ -582,9 +584,6 @@ void __pblk_close_rblk(struct pblk *pblk, struct pblk_block *rblk,
 	if (nvm_boundary_checks(dev, rqd->ppa_list, rqd->nr_ppas))
 		WARN_ON(1);
 #endif
-
-	/* A page mapping counts as one inflight I/O */
-	down(&pblk->ch_list[rblk->rlun->ch].ch_sem);
 
 	if (nvm_submit_io(dev, rqd)) {
 		pr_err("pblk: I/O submission failed\n");
