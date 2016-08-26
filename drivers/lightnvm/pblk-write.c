@@ -187,7 +187,7 @@ int pblk_write_alloc_rq(struct pblk *pblk, struct nvm_rq *rqd,
 	rqd->opcode = NVM_OP_PWRITE;
 	rqd->ins = &pblk->instance;
 	rqd->nr_ppas = nr_secs;
-	rqd->flags |= pblk_set_progr_mode(pblk);
+	rqd->flags = pblk_set_progr_mode(pblk);
 
 	rqd->meta_list = nvm_dev_dma_alloc(pblk->dev, GFP_KERNEL,
 							&rqd->dma_meta_list);

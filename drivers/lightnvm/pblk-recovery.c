@@ -123,6 +123,7 @@ static int pblk_setup_rec_rq(struct pblk *pblk, struct nvm_rq *rqd,
 	}
 
 	rqd->ppa_status = (u64)0;
+	rqd->flags = pblk_set_progr_mode(pblk);
 
 #ifdef CONFIG_NVM_DEBUG
 	if (nvm_boundary_checks(pblk->dev, rqd->ppa_list, rqd->nr_ppas))
@@ -492,7 +493,6 @@ void pblk_recov_clean_bb_list(struct pblk *pblk, struct pblk_lun *rlun)
 			pblk_put_blk_unlocked(pblk, rblk);
 		spin_unlock(&rblk->lock);
 	}
-
 }
 
 struct nvm_rq *pblk_setup_close_rblk(struct pblk *pblk, struct pblk_block *rblk,
@@ -550,6 +550,7 @@ struct nvm_rq *pblk_setup_close_rblk(struct pblk *pblk, struct pblk_block *rblk,
 	rqd->bio = bio;
 	rqd->opcode = NVM_OP_PWRITE;
 	rqd->ins = &pblk->instance;
+	rqd->flags = pblk_set_progr_mode(pblk);
 	rqd->meta_list = NULL;
 
 	return rqd;
