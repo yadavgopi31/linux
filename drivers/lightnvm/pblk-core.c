@@ -557,6 +557,7 @@ struct pblk_block *pblk_get_blk(struct pblk *pblk, struct pblk_lun *rlun)
 	struct nvm_block *blk;
 	struct pblk_block *rblk;
 	struct pblk_blk_rec_lpg *rlpg;
+	int flags;
 
 retry:
 	blk = nvm_get_blk(pblk->dev, lun);
@@ -573,7 +574,9 @@ retry:
 	/* TODO: For now, we erase blocks as we get them. The media manager will
 	 * do this when as part of the GC scheduler
 	 */
-	if (nvm_erase_blk(dev, rblk->parent, pblk_set_progr_mode(pblk))) {
+	flags = pblk_set_progr_mode(pblk);
+
+	if (nvm_erase_blk(dev, rblk->parent, flags)) {
 		struct ppa_addr ppa, gen_ppa;;
 
 		/* Mark block as bad and return it to media manager */
