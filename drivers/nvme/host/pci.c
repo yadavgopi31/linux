@@ -280,6 +280,8 @@ static void __nvme_submit_cmd(struct nvme_queue *nvmeq,
 	else
 		memcpy(&nvmeq->sq_cmds[tail], cmd, sizeof(*cmd));
 
+	nvm_check_write_cmd_correct(cmd);
+
 	if (++tail == nvmeq->q_depth)
 		tail = 0;
 	writel(tail, nvmeq->q_db);
