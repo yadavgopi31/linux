@@ -199,6 +199,7 @@ int pblk_write_alloc_rq(struct pblk *pblk, struct nvm_rq *rqd,
 	if (unlikely(nr_secs == 1))
 		return 0;
 
+	/* TODO: Reuse same dma region for ppa_list and metadata */
 	rqd->ppa_list = nvm_dev_dma_alloc(pblk->dev, GFP_KERNEL,
 							&rqd->dma_ppa_list);
 	if (!rqd->ppa_list) {
