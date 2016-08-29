@@ -604,6 +604,18 @@ extern int nvm_dev_factory(struct nvm_dev *, int flags);
 
 extern void nvm_check_write_cmd_correct(void *cmd);
 
+static inline void print_ppa(struct ppa_addr *p, char *msg, int error)
+{
+	if (p->c.is_cached) {
+		pr_err("ppa: (%s: %x) cache line: %llu\n",
+				msg, error, (u64)p->c.line);
+	} else {
+		pr_err("ppa: (%s: %x) %llx: ch:%d,pl:%d,lun:%d,blk:%d,pg:%d,sec:%d\n",
+			msg, error, p->ppa,
+			p->g.ch, p->g.pl, p->g.lun, p->g.blk, p->g.pg, p->g.sec);
+	}
+}
+
 #else /* CONFIG_NVM */
 struct nvm_dev_ops;
 
@@ -616,5 +628,6 @@ static inline int nvm_register(struct nvm_dev *dev)
 	return -EINVAL;
 }
 static inline void nvm_unregister(struct nvm_dev *dev) {}
+
 #endif /* CONFIG_NVM */
 #endif /* LIGHTNVM.H */
