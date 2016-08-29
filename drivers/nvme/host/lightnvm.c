@@ -652,3 +652,108 @@ int nvme_nvm_ns_supported(struct nvme_ns *ns, struct nvme_id_ns *id)
 
 	return 0;
 }
+
+#ifdef CONFIG_NVM_DEBUG
+void nvm_check_write_cmd_correct(void *data)
+{
+	struct nvme_nvm_command *cmd = data;
+	int flags = le16_to_cpu(cmd->ph_rw.control);
+	int nppas = le16_to_cpu(cmd->ph_rw.length) + 1;
+
+	if (cmd->ph_rw.opcode == NVM_OP_PWRITE) {
+		int ppa_off = 0;
+		int i;
+		u64 *ppa_list, ppa1, ppa2, mask1, mask2, exp, exp2;
+
+		ppa_list = (u64*) phys_to_virt(le64_to_cpu(cmd->ph_rw.spba));
+
+		if (flags != NVM_IO_QUAD_ACCESS)
+			pr_err("W ERROR - flags:%d\n", flags);
+
+		if (((nppas) % 16))
+			pr_err("W ERROR - nppas:%d\n", nppas);
+
+next:
+		mask1 = 0xF0;
+		mask2 = 0xFFFFFF0F;
+
+		exp2 = ppa_list[ppa_off] & mask2;
+
+		for (i = ppa_off; i < ppa_off + 16; i++) {
+			exp = i % 16;
+			ppa1 = (ppa_list[i] & mask1) >> 4;
+			ppa2 = ppa_list[i] & mask2;
+
+			if (ppa2 != exp2) {
+				int j;
+
+				pr_err("W ERROR - exp:%llu, ppa2:%llu\n",
+						exp2, ppa2);
+
+				for (j = ppa_off; j < ppa_off + 16; j++)
+					pr_err("dev[%d]:%llx\n",
+							j, ppa_list[j]);
+			}
+
+			if (ppa1 != exp) {
+				int j;
+
+				pr_err("W ERROR - exp:%llu, ppa1:%llu\n",
+						exp, ppa1);
+
+				for (j = ppa_off; j < ppa_off + 16; j++)
+					pr_err("dev[%d]:%llx\n",
+							j, ppa_list[j]);
+			}
+
+			if (ppa_list[i] >> 31) {
+				int j;
+
+				pr_err("W ERROR - corrupted\b");
+
+				for (j = ppa_off; j < ppa_off + 16; j++)
+					pr_err("dev[%d]:%llx\n",
+							j, ppa_list[j]);
+			}
+		}
+
+		ppa_off += 16;
+		if (ppa_off < nppas)
+			goto next;
+	} else if (cmd->ph_rw.opcode == NVM_OP_PREAD) {
+		if (flags != (NVM_IO_SNGL_ACCESS | NVM_IO_SUSPEND))
+			pr_err("R ERROR - flags:%d\n", flags);
+	} else if (cmd->ph_rw.opcode == NVM_OP_ERASE) {
+		u64 *ppa_list, ppa, mask, exp;
+		int i;
+
+		ppa_list = (u64*) phys_to_virt(le64_to_cpu(cmd->ph_rw.spba));
+
+		if (flags != NVM_IO_QUAD_ACCESS)
+			pr_err("E ERROR - flags:%d\n", flags);
+
+		if (nppas != 4)
+			pr_err("E ERROR - nppas:%d\n", flags);
+
+		/* Planes */
+		mask = 0xC0;
+		for (i = 0; i < nppas; i++) {
+			exp = i;
+			ppa = (ppa_list[i] & mask) >> 6;
+
+			if (ppa != exp) {
+				int j;
+
+				pr_err("E ERROR - exp:%llu, ppa:%llu\n",
+						exp, ppa);
+
+				for (j = 0; j < nppas; j++)
+					pr_err("dev[%d]:%llx\n",
+							j, ppa_list[j]);
+			}
+		}
+	}
+}
+#else /* CONFIG_NVM_DEBUG */
+void nvm_check_write_cmd_correct(void *data) {}
+#endif
