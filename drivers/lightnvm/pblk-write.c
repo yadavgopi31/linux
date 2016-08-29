@@ -622,7 +622,10 @@ void pblk_end_io_write(struct pblk *pblk, struct nvm_rq *rqd)
 
 	up(&pblk->wr_sem);
 
-	if (rqd->error == NVM_RSP_ERR_FAILWRITE) {
+	if (rqd->error) {
+#ifdef CONFIG_NVM_DEBUG
+		pblk_print_failed_rqd(pblk, rqd, rqd->error);
+#endif
 		nvm_addr_to_generic_mode(dev, rqd);
 		return pblk_end_w_fail(pblk, rqd);
 	}
