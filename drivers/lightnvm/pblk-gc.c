@@ -72,7 +72,7 @@ static int pblk_gc_read_victim_blk(struct pblk *pblk, u64 *lba_list,
 	}
 
 	bio->bi_iter.bi_sector = 0; /* artificial bio */
-	bio->bi_rw = READ;
+	bio->bi_opf = READ;
 	bio_set_op_attrs(bio, REQ_OP_READ, 0);
 	bio->bi_private = &wait;
 	bio->bi_end_io = pblk_end_sync_bio;
@@ -243,7 +243,7 @@ static int pblk_gc_write_to_buffer(struct pblk *pblk, u64 *lba_list,
 	}
 
 	bio->bi_iter.bi_sector = 0; /* artificial bio */
-	bio->bi_rw = WRITE;
+	bio->bi_opf = WRITE;
 	bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 
 write_retry:

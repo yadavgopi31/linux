@@ -165,7 +165,7 @@ void pblk_submit_rec(struct work_struct *work)
 		return;
 	}
 	bio->bi_iter.bi_sector = 0; /* artificial bio */
-	bio->bi_rw = WRITE;
+	bio->bi_opf = WRITE;
 	bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 	rqd->bio = bio;
 
@@ -292,7 +292,7 @@ struct nvm_rq *pblk_recov_setup(struct pblk *pblk, void *recov_page)
 	}
 
 	bio->bi_iter.bi_sector = 0;
-	bio->bi_rw = READ;
+	bio->bi_opf = READ;
 	bio_set_op_attrs(bio, REQ_OP_READ, 0);
 	bio->bi_end_io = pblk_end_sync_bio;
 
@@ -559,7 +559,7 @@ struct nvm_rq *pblk_setup_close_rblk(struct pblk *pblk, struct pblk_block *rblk,
 
 	bio_get(bio);
 	bio->bi_iter.bi_sector = 0;
-	bio->bi_rw = WRITE;
+	bio->bi_opf = WRITE;
 	bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 
 	rqd->bio = bio;

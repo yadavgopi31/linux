@@ -187,7 +187,7 @@ static int pblk_setup_write_to_cache(struct pblk *pblk, struct bio *bio,
 	if (!pblk_rb_may_write(&pblk->rwb, nr_upd, nr_com, pos))
 		return 0;
 
-	ctx_bio = (bio->bi_rw & REQ_PREFLUSH) ? bio : NULL;
+	ctx_bio = (bio->bi_opf & REQ_PREFLUSH) ? bio : NULL;
 	return 1;
 }
 
@@ -205,7 +205,7 @@ static int __pblk_write_to_cache(struct pblk *pblk, struct bio *bio,
 				 unsigned long flags, unsigned int nr_entries)
 {
 	sector_t laddr = pblk_get_laddr(bio);
-	struct bio *ctx_bio = (bio->bi_rw & REQ_PREFLUSH) ? bio : NULL;
+	struct bio *ctx_bio = (bio->bi_opf & REQ_PREFLUSH) ? bio : NULL;
 	struct pblk_w_ctx w_ctx;
 	unsigned long bpos;
 	unsigned int i;
@@ -363,7 +363,7 @@ int pblk_write_to_cache(struct pblk *pblk, struct bio *bio, unsigned long flags)
 	int nr_secs = pblk_get_secs(bio);
 	int ret = NVM_IO_DONE;
 
-	if (bio->bi_rw & REQ_PREFLUSH) {
+	if (bio->bi_opf & REQ_PREFLUSH) {
 #ifdef CONFIG_NVM_DEBUG
 		atomic_inc(&pblk->nr_flush);
 #endif
@@ -404,7 +404,7 @@ retry:
 #endif
 
 	/* Use count as a heuristic for setting up a job in workqueue */
-	if (bio->bi_rw & REQ_PREFLUSH)
+	if (bio->bi_opf & REQ_PREFLUSH)
 		pblk_write_kick(pblk);
 
 out:
@@ -424,7 +424,7 @@ void pblk_flush_writer(struct pblk *pblk)
 	}
 
 	bio->bi_iter.bi_sector = 0; /* artificial bio */
-	bio->bi_rw = REQ_OP_WRITE | REQ_PREFLUSH;
+	bio->bi_opf = REQ_OP_WRITE | REQ_PREFLUSH;
 	bio_set_op_attrs(bio, REQ_OP_WRITE, WRITE_FLUSH);
 	bio->bi_private = &wait;
 	bio->bi_end_io = pblk_end_sync_bio;
@@ -826,7 +826,7 @@ static void pblk_pad_blk(struct pblk *pblk, struct pblk_block *rblk,
 		}
 
 		bio->bi_iter.bi_sector = 0; /* artificial bio */
-		bio->bi_rw = WRITE;
+		bio->bi_opf = WRITE;
 		bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 		bio->bi_private = &wait;
 		bio->bi_end_io = pblk_end_sync_bio;

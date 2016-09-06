@@ -31,7 +31,7 @@ static const struct block_device_operations pblk_fops = {
 static int pblk_submit_io_checks(struct pblk *pblk, struct bio *bio)
 {
 	int bio_size = bio_sectors(bio) << 9;
-	int is_flush = (bio->bi_rw & REQ_PREFLUSH);
+	int is_flush = (bio->bi_opf & REQ_PREFLUSH);
 
 	if ((bio_size < pblk->dev->sec_size) && (!is_flush))
 		return 1;
@@ -45,7 +45,7 @@ static int pblk_submit_io(struct pblk *pblk, struct bio *bio,
 	if (pblk_submit_io_checks(pblk, bio))
 		return NVM_IO_ERR;
 
-	if (bio_rw(bio) == READ)
+	if (bio_data_dir(bio) == READ)
 		return pblk_submit_read(pblk, bio, flags);
 
 	return pblk_write_to_cache(pblk, bio, flags);
@@ -56,9 +56,9 @@ static blk_qc_t pblk_make_rq(struct request_queue *q, struct bio *bio)
 	struct pblk *pblk = q->queuedata;
 	int err;
 
-	if (bio->bi_rw & REQ_OP_DISCARD) {
+	if (bio_op(bio) & REQ_OP_DISCARD) {
 		pblk_discard(pblk, bio);
-		if (!(bio->bi_rw & REQ_PREFLUSH))
+		if (!(bio->bi_opf & REQ_PREFLUSH))
 			return BLK_QC_T_NONE;
 	}
 
@@ -874,7 +874,7 @@ static ssize_t pblk_sysfs_l2p_map_sanity(struct pblk *pblk, const char *buf,
 	}
 
 	bio->bi_iter.bi_sector = 0;
-	bio->bi_rw = READ;
+	bio->bi_opf = READ;
 	bio_set_op_attrs(bio, REQ_OP_READ, 0);
 	bio->bi_end_io = pblk_end_sync_bio;
 	bio->bi_private = &wait;

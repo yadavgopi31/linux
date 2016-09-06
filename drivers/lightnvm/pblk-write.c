@@ -365,7 +365,7 @@ int pblk_submit_write(struct pblk *pblk)
 			goto fail_sync;
 
 	bio->bi_iter.bi_sector = 0; /* artificial bio */
-	bio->bi_rw = WRITE;
+	bio->bi_opf = WRITE;
 	bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 	rqd->bio = bio;
 

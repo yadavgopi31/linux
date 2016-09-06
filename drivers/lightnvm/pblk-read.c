@@ -184,7 +184,7 @@ static int pblk_fill_partial_read_bio(struct pblk *pblk, struct bio *bio,
 	}
 
 	new_bio->bi_iter.bi_sector = 0; /* artificial bio */
-	new_bio->bi_rw = READ;
+	new_bio->bi_opf = READ;
 	bio_set_op_attrs(bio, REQ_OP_READ, 0);
 	new_bio->bi_private = &wait;
 	new_bio->bi_end_io = pblk_end_sync_bio;
