@@ -447,9 +447,6 @@ static void pblk_tear_down(struct pblk *pblk)
 	del_timer(&pblk->wtimer);
 	kthread_stop(pblk->ts_writer);
 
-	/* TODO: must wait on it to finish, else
-	 *       blk pool might be used after free
-	 */
 	pblk_blk_pool_stop(pblk);
 
 	pblk_pad_open_blks(pblk);
@@ -461,7 +458,6 @@ static void pblk_tear_down(struct pblk *pblk)
 		return;
 	}
 
-	/* TODO: Stop GC before freeing blocks */
 	pblk_free_blks(pblk);
 
 	pr_debug("pblk: consistent tear down\n");
